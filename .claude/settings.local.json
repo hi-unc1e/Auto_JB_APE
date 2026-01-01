@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(~/Desktop/opt/ai-dev/.venv/bin/python:*)",
+      "Bash(DEBUG=1 ~/Desktop/opt/ai-dev/.venv/bin/python:*)",
+      "Bash(~/Desktop/opt/ai-dev/.venv/bin/pip install:*)",
+      "Bash(~/Desktop/opt/ai-dev/.venv/bin/pytest:*)",
+      "Bash(git add:*)",
+      "Bash(/Users/dpdu/Desktop/opt/ai-dev/.venv/bin/python:*)"
+    ]
+  }
+}
