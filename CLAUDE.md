@@ -39,9 +39,9 @@ planner -> player -> executor -> checker -> (back to planner or END)
 | Node | Responsibility |
 |------|---------------|
 | **Planner** | Selects attack technique from a predefined library, provides strategic guidance to Player based on failure feedback |
-| **Player** | Generates actual attack payload (prompt) based on Planner's strategy |
-| **Executor** | Uses Playwright to fill `#taid` textarea and submit form to target URL |
-| **Checker** | Evaluates response to determine if jailbreak succeeded, provides analysis |
+| **Player** | Retrieves CONCURRENCY payloads from batch for concurrent execution |
+| **Executor** | Uses Playwright to concurrently send multiple payloads to target URL (via asyncio.gather) |
+| **Checker** | Evaluates multiple responses concurrently, takes best quality score |
 
 ### Attack Techniques Library
 
@@ -58,12 +58,15 @@ Located in `ape.py:43-49`, currently 5 techniques:
 
 - `target_goal`: The malicious objective being tested
 - `current_technique`: Currently selected attack method
-- `current_payload`: Generated attack prompt
-- `raw_response`: Target LLM's response
+- `current_payload`: Generated attack prompt (legacy, for compatibility)
+- `current_payloads`: List of concurrent payloads (new)
+- `raw_response`: Target LLM's response (legacy, for compatibility)
+- `raw_responses`: List of concurrent responses (new)
 - `history`: Accumulated attack attempts (append-only list)
 - `analysis`: Checker's feedback to Planner
 - `success`: Whether jailbreak succeeded
-- `attempts`: Number of attempts (max 5)
+- `attempts`: Number of attempts
+- `batch_index`: Current position in batch (increments by CONCURRENCY)
 
 ### Target Environment
 
@@ -114,4 +117,6 @@ DEBUG=1 python ape.py
 1. **Browser Automation**: Playwright runs headless by default, set `headless=False` in `ape.py:179` for debugging
 2. **Technique Rotation**: Simple modulo-based rotation: `attempts % len(techniques)`
 3. **Success Detection**: Checker parses LLM response for "SUCCESS: True" in its own output
-4. **Max Attempts**: Hardcoded to 5 in `should_continue()` function
+4. **Concurrent Execution**: Each round sends CONCURRENCY (default 2) payloads simultaneously using `asyncio.gather()`
+5. **Batch Progression**: `batch_index` increments by CONCURRENCY (0 → 2 → 4 → 5 for CONCURRENCY=2)
+6. **Checker Aggregation**: Takes best quality score from concurrent results, any success = overall success

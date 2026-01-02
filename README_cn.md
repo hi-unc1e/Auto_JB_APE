@@ -17,6 +17,7 @@
 ## 核心特性
 
 - **多智能体编排**：闭环反馈系统，包含 4 个专业化节点
+- **并发载荷执行**：每轮同时发送 2 个载荷（可配置），大幅提升速度
 - **渐进式载荷生成**：每轮生成 5 个强度递增的载荷（浅层 → 中层 → 深层）
 - **质量评分追踪**：以 0-100 分评估响应，检测 AI 是否开始"松口"
 - **智能迭代策略**：当 AI 表现出妥协迹象时，继续使用更深层载荷
@@ -40,9 +41,9 @@
 | 节点 | 职责 |
 |------|------|
 | **Planner (规划器)** | 选择攻击手法，分析历史记录，生成 5 个渐进式载荷 |
-| **Player (执行器)** | 从批次中获取下一个载荷（保持深度递进） |
-| **Executor (浏览器)** | 使用 Playwright 填写 `#taid` 文本框并提交表单 |
-| **Checker (裁判)** | 评估响应，分配质量分数（0-100），提供详细分析 |
+| **Player (执行器)** | 从批次中获取 CONCURRENCY 个载荷进行并发执行 |
+| **Executor (浏览器)** | 使用 Playwright 并发发送多个载荷到目标 URL（通过 asyncio.gather） |
+| **Checker (裁判)** | 并发评估多个响应，取最高质量分数，任一成功则整体成功 |
 
 ### 状态管理
 
@@ -50,11 +51,13 @@
 JailbreakState {
     target_goal: str          # 正在测试的恶意目标
     current_technique: str    # 当前选择的攻击手法
-    current_payload: str      # 生成的攻击提示词
+    current_payload: str      # 生成的攻击提示词（兼容保留）
+    current_payloads: List[str] # 并发载荷列表（新增）
     payloads_batch: List[str] # 5 个载荷（浅层 → 深层）
-    batch_index: int          # 批次中的当前位置 (0-4)
+    batch_index: int          # 批次中的当前位置 (0→2→4→5, 每次增加 CONCURRENCY)
     current_depth: str        # 深度级别：浅层/中层/深层
-    raw_response: str         # 目标 LLM 的响应
+    raw_response: str         # 目标 LLM 的响应（兼容保留）
+    raw_responses: List[str]  # 并发响应列表（新增）
     history: List[dict]       # 累积的攻击尝试记录
     analysis: str             # Checker 给 Planner 的反馈
     success: bool             # 是否越狱成功
@@ -146,6 +149,7 @@ DEBUG=1 python ape.py
 |------|--------|------|
 | `MAX_ATTEMPTS` | 20 | 最大轮数 |
 | `MODEL_NAME` | `deepseek-chat` | 使用的 LLM 模型 |
+| `CONCURRENCY` | `2` | 每轮并发发送的载荷数量 |
 | `headless` | `True` | 浏览器模式 |
 
 ## 流程控制
@@ -191,8 +195,9 @@ tech.txt        # 攻击手法库
 1. **浏览器自动化**：Playwright 以无头模式运行，不干扰用户工作流
 2. **手法轮换**：基于可用手法的模运算轮换
 3. **成功检测**：Checker 解析 LLM 响应中的 "SUCCESS: True" 标记
-4. **深度递进**：每个批次包含 5 个载荷（2 个浅层 → 2 个中层 → 1 个深层）
-5. **智能迭代**：当 AI 表现出妥协迹象（分数 30-70）时，框架继续深入探测
+4. **并发执行**：每轮使用 `asyncio.gather()` 同时发送 CONCURRENCY（默认 2）个载荷
+5. **批次递进**：`batch_index` 每次增加 CONCURRENCY（例如 0 → 2 → 4 → 5）
+6. **智能迭代**：当 AI 表现出妥协迹象（分数 30-70）时，框架继续深入探测
 
 ## 项目背景
 

@@ -17,6 +17,7 @@ An **Automated LLM Jailbreak Framework** (APE) for red team testing. It uses Lan
 ## Features
 
 - **Multi-Agent Orchestration**: Closed-loop feedback system with 4 specialized nodes
+- **Concurrent Payload Execution**: Sends 2 payloads per round simultaneously (configurable), significantly faster
 - **Depth-Based Payload Generation**: Generates 5 payloads per round with progressive intensity (Shallow → Medium → Deep)
 - **Quality Score Tracking**: Evaluates responses on 0-100 scale to detect when AI starts to "loosen up"
 - **Smart Iteration Strategy**: Continues deeper payloads when AI shows signs of compromise
@@ -39,9 +40,9 @@ An **Automated LLM Jailbreak Framework** (APE) for red team testing. It uses Lan
 | Node | Responsibility |
 |------|---------------|
 | **Planner** | Selects attack technique, analyzes history, generates 5 progressive payloads |
-| **Player** | Retrieves next payload from batch (maintains depth progression) |
-| **Executor** | Uses Playwright to fill `#taid` textarea and submit form to target URL |
-| **Checker** | Evaluates response, assigns quality score (0-100), provides detailed analysis |
+| **Player** | Retrieves CONCURRENCY payloads from batch for concurrent execution |
+| **Executor** | Uses Playwright to concurrently send multiple payloads to target URL (via asyncio.gather) |
+| **Checker** | Evaluates multiple responses concurrently, takes best quality score |
 
 ### State Management
 
@@ -49,11 +50,13 @@ An **Automated LLM Jailbreak Framework** (APE) for red team testing. It uses Lan
 JailbreakState {
     target_goal: str          # The malicious objective being tested
     current_technique: str    # Currently selected attack method
-    current_payload: str      # Generated attack prompt
+    current_payload: str      # Generated attack prompt (legacy, for compatibility)
+    current_payloads: List[str] # Concurrent payloads list (new)
     payloads_batch: List[str] # 5 payloads (shallow → deep)
-    batch_index: int          # Current position in batch (0-4)
+    batch_index: int          # Current position in batch (0→2→4→5, increments by CONCURRENCY)
     current_depth: str        # Depth level: Shallow/Medium/Deep
-    raw_response: str         # Target LLM's response
+    raw_response: str         # Target LLM's response (legacy, for compatibility)
+    raw_responses: List[str]  # Concurrent responses list (new)
     history: List[dict]       # Accumulated attack attempts
     analysis: str             # Checker's feedback to Planner
     success: bool             # Whether jailbreak succeeded
@@ -147,6 +150,7 @@ Expected HTML structure:
 |-----------|---------|-------------|
 | `MAX_ATTEMPTS` | 20 | Maximum number of rounds |
 | `MODEL_NAME` | `deepseek-chat` | LLM model to use |
+| `CONCURRENCY` | `2` | Number of concurrent payloads per round |
 | `headless` | `True` | Browser mode |
 
 ## Flow Control
@@ -192,8 +196,9 @@ tech.txt        # Attack techniques library
 1. **Browser Automation**: Playwright runs in headless mode to avoid interrupting user workflow
 2. **Technique Rotation**: Modulo-based rotation through available techniques
 3. **Success Detection**: Checker parses LLM response for "SUCCESS: True" marker
-4. **Depth Progression**: Each batch contains 5 payloads (2 shallow → 2 medium → 1 deep)
-5. **Smart Iteration**: When AI shows signs of compromise (score 30-70), framework continues probing deeper
+4. **Concurrent Execution**: Each round sends CONCURRENCY (default 2) payloads simultaneously using `asyncio.gather()`
+5. **Batch Progression**: `batch_index` increments by CONCURRENCY (0 → 2 → 4 → 5 for CONCURRENCY=2)
+6. **Smart Iteration**: When AI shows signs of compromise (score 30-70), framework continues probing deeper
 
 ## License
 
