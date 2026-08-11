@@ -1,0 +1,270 @@
+"""Planner — technique selection via contextual bandit + tree search
+(devdocs/05 §5, §6).
+
+Two concerns:
+
+* ``Bandit`` — Thompson-sampling contextual bandit keyed by ``(track, arm)``.
+  Rewards come from the judge. ``arm`` is a coarse strategy id combining a
+  technique id with the primary bypass it applied (devdocs/05 §5.3).
+* ``Planner`` — picks arms via the bandit, renders seed variants, and exposes a
+  tree-search step (``prune``) so the generator can drop low-scoring branches
+  (TAP-style, devdocs/05 §6.1).
+"""
+
+from __future__ import annotations
+
+import random
+from dataclasses import dataclass, field
+
+from jb_ape.models import DefenseProfile, Objective, Track, Variant
+from jb_ape.techniques import TECHNIQUES, Technique, render, technique_for_track
+
+
+@dataclass
+class BanditArm:
+    """Beta(α, β) posterior for one strategy arm (devdocs/05 §5.2)."""
+
+    arm_id: str
+    alpha: float = 1.0
+    beta: float = 1.0
+
+    def update(self, reward: float) -> None:
+        """reward in [0,1]; ≥0.5 → success-like, else failure-like."""
+        if reward >= 0.5:
+            self.alpha += 2.0 * (reward - 0.5) * 2  # scale to strengthen signal
+        else:
+            self.beta += 2.0 * (0.5 - reward) * 2
+
+    def sample(self, rng: random.Random) -> float:
+        return rng.betavariate(max(0.01, self.alpha), max(0.01, self.beta))
+
+
+class Bandit:
+    """Contextual Thompson bandit (devdocs/05 §5.3). State is independent per
+    track so an office-track win doesn't distort ecommerce choices."""
+
+    def __init__(self, rng: random.Random | None = None) -> None:
+        self.rng = rng or random.Random()
+        self._arms: dict[tuple[Track, str], BanditArm] = {}
+
+    def arm(self, track: Track, arm_id: str) -> BanditArm:
+        key = (track, arm_id)
+        if key not in self._arms:
+            self._arms[key] = BanditArm(arm_id=arm_id)
+        return self._arms[key]
+
+    def select(self, track: Track, arm_ids: list[str], explore_eps: float = 0.2) -> str:
+        """Thompson-select an arm. With probability ``explore_eps`` pick uniformly
+        (ε-greedy exploration on top of Thompson for cold-start diversity)."""
+        if not arm_ids:
+            raise ValueError("arm_ids must be non-empty")
+        if self.rng.random() < explore_eps:
+            return self.rng.choice(arm_ids)
+        best, best_s = None, -1.0
+        for aid in arm_ids:
+            s = self.arm(track, aid).sample(self.rng)
+            if s > best_s:
+                best, best_s = aid, s
+        return best  # type: ignore[return-value]
+
+    def reward(self, track: Track, arm_id: str, achieved: bool, score: int) -> None:
+        """Convert a judge verdict into a [0,1] reward and update the posterior."""
+        norm = max(0.0, min(1.0, score / 100.0))
+        # Bonus for achieving the objective (devdocs/05 §5.2).
+        reward = min(1.0, norm + (0.25 if achieved else 0.0))
+        self.arm(track, arm_id).update(reward)
+
+    def prime(self, track: Track, priors: dict[str, tuple[float, float]]) -> None:
+        """Warm-start posteriors from literature priors (armory/priors).
+        Merges the prior (α, β) into the existing Beta posterior so the bandit
+        isn't blind on the first round of a new track."""
+        for arm_id, (alpha, beta) in priors.items():
+            arm = self.arm(track, arm_id)
+            arm.alpha += max(0.0, alpha - 1.0)
+            arm.beta += max(0.0, beta - 1.0)
+
+
+@dataclass
+class Planner:
+    """Selects techniques and seeds initial variants each round.
+
+    When an ``Armory`` is attached, the planner:
+    1. warm-starts the bandit from literature priors (prime on first round),
+    2. seeds each round from curated track seeds + technique renders,
+    3. prioritizes validated effective chains for the track.
+    """
+
+    objective: Objective
+    bandit: Bandit
+    profile: DefenseProfile | None = None
+    armory: object | None = None  # jb_ape.armory.Armory (typed loosely to avoid import cycle)
+    explore_eps_start: float = 0.3
+    explore_eps_end: float = 0.05
+
+    def _candidate_techniques(self) -> list[Technique]:
+        techs = technique_for_track(self.objective.track)
+        return techs or list(TECHNIQUES.values())
+
+    def _eps(self, round_idx: int, max_rounds: int) -> float:
+        if max_rounds <= 1:
+            return self.explore_eps_end
+        t = max(0.0, min(1.0, round_idx / max(1, max_rounds - 1)))
+        return self.explore_eps_start + t * (self.explore_eps_end - self.explore_eps_start)
+
+    def plan_round(
+        self,
+        round_idx: int,
+        max_rounds: int,
+        bundle_size: int = 3,
+    ) -> list[Variant]:
+        """Pick a technique via the bandit and render ``bundle_size`` seed
+        variants going shallow → deep. The generator/rewriter extends these."""
+        # Warm-start the bandit once from literature priors (devdocs/05 §5.2).
+        if round_idx == 0 and self.armory is not None:
+            priors = self.armory.load_priors(self.objective.track)
+            if priors:
+                self.bandit.prime(self.objective.track, priors)
+
+        techs = self._candidate_techniques()
+        arm_ids = [t.tid for t in techs]
+        eps = self._eps(round_idx, max_rounds)
+        chosen_id = self.bandit.select(self.objective.track, arm_ids, explore_eps=eps)
+        chosen = next((t for t in techs if t.tid == chosen_id), techs[0])
+
+        seeds: list[Variant] = []
+        # On round 0, prefer curated track seeds + validated chains first —
+        # they encode hard-won signal (armory/findings, armory/seeds).
+        if round_idx == 0 and self.armory is not None:
+            seeds.extend(self._seeds_from_armory(bundle_size))
+            seeds.extend(self._seeds_from_chains(bundle_size))
+        # Fill remaining slots with technique renders.
+        for depth in range(max(0, bundle_size - len(seeds))):
+            body = render(chosen, self.objective.goal)
+            seeds.append(Variant(
+                payload=body, technique=chosen.tid, scenario="",
+                bypasses=[], mutation_chain=[chosen.tid], depth=depth,
+            ))
+
+        # Recon-aware seeding (devdocs/02 §7): on round 0, if recon detected
+        # active defense layers, pre-apply the matching bypasses to the seeds
+        # so the FIRST submission already counters the known defenses (instead
+        # of attacking blind and wasting a round to discover them reactively).
+        if round_idx == 0 and self.profile is not None and self.profile.detected_layers:
+            seeds = [self._apply_recon_bypasses(s) for s in seeds]
+
+        return seeds[: max(bundle_size, len(seeds))]
+
+    def _apply_recon_bypasses(self, variant: Variant) -> Variant:
+        """Fold recon-detected layers into a seed variant by appending the
+        recommended bypass ids. The actual payload text is transformed later
+        by the rewriter/mechanical generators; this just records intent so the
+        bandit attributes correctly and the rewriter knows what to apply."""
+        from jb_ape.rewriter import _LAYER_TO_BYPASSES
+        extra: list[str] = []
+        for layer in self.profile.detected_layers:  # type: ignore[union-attr]
+            extra.extend(_LAYER_TO_BYPASSES.get(layer, []))
+        if not extra:
+            return variant
+        bypasses = list(dict.fromkeys(variant.bypasses + extra))
+        chain = variant.mutation_chain + ["RECON:" + ",".join(
+            layer.value for layer in self.profile.detected_layers  # type: ignore[union-attr]
+        )]
+        return Variant(
+            payload=variant.payload, technique=variant.technique,
+            scenario=variant.scenario, bypasses=bypasses,
+            mutation_chain=chain, depth=variant.depth,
+        )
+
+    def _seeds_from_armory(self, bundle_size: int) -> list[Variant]:
+        out: list[Variant] = []
+        if self.armory is None:
+            return out
+        for seed in self.armory.load_seeds(self.objective.track)[:bundle_size]:
+            out.append(seed.to_variant(self.objective.goal))
+        return out
+
+    def _seeds_from_chains(self, bundle_size: int) -> list[Variant]:
+        """Materialize the top effective chain for this track into a single
+        seed payload (the first element of the chain). Deeper chain elements
+        are applied by the rewriter in subsequent rounds."""
+        out: list[Variant] = []
+        if self.armory is None:
+            return out
+        chains = self.armory.load_chains(self.objective.track)
+        if not chains:
+            return out
+        top = max(chains, key=lambda c: c.asr_prior)
+        # Use the first chain element if it matches a known seed, else a token.
+        first = top.sequence[0] if top.sequence else ""
+        for seed in self.armory.load_seeds(self.objective.track):
+            if seed.sid == first:
+                out.append(seed.to_variant(self.objective.goal, depth=0))
+                break
+        return out[:bundle_size]
+
+
+@dataclass
+class TreeNode:
+    """A search branch (TAP-style, devdocs/05 §6.1).
+
+    Carries the judge's precise diagnosis so the next round's rewriter targets
+    the *actual* blocked layer, not a score-based guess."""
+
+    variant: Variant
+    score: int = 0
+    achieved: bool = False
+    pruned: bool = False
+    children: list[TreeNode] = field(default_factory=list)
+    resistance_hit: set = field(default_factory=set)  # set[DefenseLayer]
+    improve_hint: str = ""
+    refusal_type: str = "none"
+
+
+def prune(nodes: list[TreeNode], beam_width: int = 3, floor: int = 25) -> list[TreeNode]:
+    """TAP-style pruning: drop branches below ``floor`` and keep top
+    ``beam_width`` by score. Achieved branches are always retained."""
+    alive = [n for n in nodes if (n.score >= floor or n.achieved)]
+    for n in alive:
+        n.pruned = False
+    dead = [n for n in nodes if n not in alive]
+    for n in dead:
+        n.pruned = True
+    alive.sort(key=lambda n: (n.achieved, n.score), reverse=True)
+    return alive[:beam_width]
+
+
+def dedupe_by_payload(nodes: list[TreeNode]) -> list[TreeNode]:
+    """TAP de-duplication (devdocs/05 §6.1): skip payloads we've already tried."""
+    seen: set[str] = set()
+    out: list[TreeNode] = []
+    for n in nodes:
+        key = n.variant.payload.strip().lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(n)
+    return out
+
+
+def on_topic_check(payload: str, goal: str, llm) -> bool:
+    """TAP Phase-1 on-topic gate (devdocs/12 §2.2). Returns True if the payload
+    still asks for the same information as the goal.
+
+    Without an LLM, the gate is permissive (returns True) — the actual on-topic
+    signal then comes from the judge after the (more expensive) target query.
+    With an LLM, it runs a cheap YES/NO check that prunes drifted prompts BEFORE
+    spending a target query on them.
+    """
+    if llm is None:
+        return True
+    import re
+
+    from jb_ape.prompts import ON_TOPIC_SYSTEM, ON_TOPIC_USER_TEMPLATE
+
+    try:
+        raw = llm.chat(ON_TOPIC_SYSTEM, ON_TOPIC_USER_TEMPLATE.format(goal=goal, payload=payload))
+    except Exception:  # noqa: BLE001 — pruning is advisory
+        return True
+    m = re.search(r"\[\[(YES|NO)\]\]", raw, re.IGNORECASE)
+    if not m:
+        return True  # unparseable → don't prune on a fluke
+    return m.group(1).upper() == "YES"
