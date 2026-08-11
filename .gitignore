@@ -19,7 +19,8 @@ http.log
 exploit.html
 exfil2.html
 .playwright-mcp/
-rsrc/ctf_*.md
+# legacy/ctf 题解含 HTB flag —— 本地保留，不推送
+legacy/ctf/
 
 # Python
 __pycache__/
