@@ -4,6 +4,49 @@ An **Automated LLM Jailbreak Framework** (APE) for red team testing. It uses Lan
 
 > **Important**: This is an authorized security research tool designed for CTF-style red team testing against local test environments.
 
+---
+
+## ➡️ New: `src/jb_ape/` wisdom engine + `devdocs/` knowledge base
+
+The repository now ships a **redesigned wisdom engine** (`src/jb_ape/`) and a
+**consumable knowledge base** (`devdocs/`, git-ignored — local only) built for a
+multi-track jailbreak competition. The original `ape.py` is retained below as a
+legacy reference; new work should use `src/jb_ape/`.
+
+**Quick start (offline / hermetic):**
+```bash
+ruff check src/ tests/                 # static analysis — must pass clean
+PYTHONPATH=src python3 -m unittest discover -s tests   # 97 unit tests, offline
+```
+
+**Use the engine (other agents consume it):**
+```python
+from jb_ape import quick_run, Objective, Track
+report = quick_run(
+    objective=Objective(track=Track.ECOMMERCE, goal="...",
+                        success_patterns=[r"HTB\{.*?\}"]),
+    url="https://target/",
+)
+```
+
+**What's where:**
+- `devdocs/README.md` — the knowledge base index (objectives, threat model,
+  bypass arsenal, agent-injection handbook, feedback-engine design, per-track
+  playbooks, jailbreak technique library, browser handoff, research refs).
+- `src/jb_ape/` — the engine: `models`, `defense` (bypass variants),
+  `judge` (3-tier adjudication + submission gate), `rewriter` (directed mutation),
+  `planner` (Thompson bandit + TAP tree search), `generator` (closed loop),
+  `browser` (engine contract + dry-run client), `llm`, `facade`.
+- `tests/` — 97 offline unit tests (mock LLM + mock browser).
+- `pyproject.toml` — `uv` + `ruff` + `unittest` configuration.
+
+> The browser automation backend (agent-browser CLI / Browser Use plugin) is
+> driven by a separate engine and implements the `BrowserClient` protocol in
+> `src/jb_ape/browser.py`. See `devdocs/08_browser_use_handoff.md`.
+
+---
+
+
 ## Table of Contents
 
 - [Features](#features)
