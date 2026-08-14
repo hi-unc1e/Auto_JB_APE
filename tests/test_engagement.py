@@ -161,3 +161,44 @@ class TestCliEngage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPlannedOptimizations(unittest.TestCase):
+    """devdocs/17 §7 backlog items landed this round."""
+
+    def test_snapshot_restores_target_history(self):
+        seen_lens = []
+
+        def transport(msgs):
+            seen_lens.append(len(msgs))
+            return "no"
+
+        tgt = _fake_target(transport)
+        eng = create_engagement(_spec(budget=10, max_rounds=4))
+        _attach(eng, tgt)
+        eng.step(rounds=2)
+        hist_before = {k: len(v) for k, v in tgt._histories.items()}
+        self.assertTrue(hist_before)
+        snap = eng.snapshot()
+
+        # "restart": brand-new target client, history injected from snapshot
+        tgt2 = _fake_target(transport)
+        eng2 = Engagement.from_snapshot(snap, browser=tgt2)
+        self.assertEqual({k: len(v) for k, v in tgt2._histories.items()},
+                         hist_before)
+        eng2.step(rounds=1)
+        # third turn saw the restored multi-turn context (msgs > fresh start)
+        self.assertTrue(any(n > 2 for n in seen_lens), seen_lens)
+
+    def test_structured_steer_disables_family(self):
+        eng = create_engagement(_spec(budget=15, max_rounds=4))
+        _attach(eng, _fake_target(lambda m: "no"))
+        eng.step(rounds=1)
+        eng.steer("avoid workflow family", disable=["T-F1"])
+        eng.step(rounds=2)
+        techs = {r.variant.technique for r in eng.ctx.records}
+        self.assertNotIn("T-F1", techs)
+        # and the disable survives a snapshot/resume
+        snap = eng.snapshot()
+        eng2 = Engagement.from_snapshot(snap, browser=_fake_target(lambda m: "no"))
+        self.assertEqual(eng2.generator.planner.state.disabled_families, {"T-F1"})

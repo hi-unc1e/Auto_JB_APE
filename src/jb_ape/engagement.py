@@ -111,16 +111,23 @@ class Engagement:
         self.save()
         return self.status()
 
-    def steer(self, hint: str) -> dict:
-        """Inject outer-agent guidance. Behavioral contract: the hint is
-        appended to every subsequently emitted payload as a bracketed context
-        line (TreeWalker) — observable, testable, and honest (documented as
-        such; not magic steering)."""
+    def steer(self, hint: str, disable: list[str] | None = None) -> dict:
+        """Inject outer-agent guidance (devdocs/17 §4).
+
+        ``hint`` rides as a bracketed ``[operator context]`` line on every
+        subsequently emitted payload (observable, testable). ``disable`` is a
+        structural steering primitive: technique-family ids (e.g. ``T-F1``)
+        whose leaves are removed from routing until re-enabled with
+        ``enable=``-style steer (pass the same id via ``disable=[]`` plus
+        hint marker? no — see mcp layer: disable is sticky; re-enable by
+        restarting the engagement or future enable API)."""
         self.steer_hints.append(hint)
         planner = self.generator.planner
         state = getattr(planner, "state", None)
         if state is not None:
             state.hints = list(self.steer_hints)
+            if disable:
+                state.disabled_families = set(state.disabled_families) | set(disable)
         self.save()
         return self.status()
 
@@ -163,6 +170,13 @@ class Engagement:
             },
             "markers": self.markers,
             "steer_hints": self.steer_hints,
+            # Target-side multi-turn history (LLMTargetClient) — restores
+            # Crescendo/CFD continuity across process restarts (devdocs/17 §7).
+            "target": {
+                "histories": ({k: list(v) for k, v in self.browser._histories.items()}
+                              if hasattr(self.browser, "_histories") else None),
+                "current": getattr(self.browser, "_current", None),
+            },
             "prepared": self._prepared,
             "ctx": {
                 "confirmed": self.ctx.confirmed,
@@ -192,8 +206,10 @@ class Engagement:
         st = snap["walker"].get("state")
         if st is not None and hasattr(st, "__dict__"):
             sd = dict(st.__dict__)
-            if "layers" in sd:
+            if isinstance(sd.get("layers"), set):
                 sd["layers"] = [getattr(x, "value", x) for x in sd["layers"]]
+            if isinstance(sd.get("disabled_families"), set):
+                sd["disabled_families"] = sorted(sd["disabled_families"])
             if "last_blocked_mode" in sd and sd["last_blocked_mode"] is not None:
                 sd["last_blocked_mode"] = getattr(
                     sd["last_blocked_mode"], "value", sd["last_blocked_mode"])
@@ -236,6 +252,12 @@ class Engagement:
                              max_rounds=spec.max_rounds),
         )
         eng = cls(spec, browser, gen, objective, snap["markers"])
+        # restore target-side conversation history
+        tgt = snap.get("target") or {}
+        if tgt.get("histories") and hasattr(browser, "_histories"):
+            browser._histories = {k: [dict(m) for m in v]
+                                  for k, v in tgt["histories"].items()}
+            browser._current = tgt.get("current")
         eng.id = snap["id"]
         eng.created = snap["created"]
         eng.steer_hints = list(snap["steer_hints"])
@@ -272,6 +294,7 @@ class Engagement:
 
                 sd = dict(st)
                 sd["layers"] = {DefenseLayer(x) for x in sd.get("layers", [])}
+                sd["disabled_families"] = set(sd.get("disabled_families", []) or [])
                 if sd.get("last_blocked_mode"):
                     sd["last_blocked_mode"] = FailureMode(sd["last_blocked_mode"])
                 gen.planner.state = TargetState(**sd)

@@ -1,6 +1,10 @@
 # AGENTS.md — how to consume this project
 
-> Read THIS file first. It is the only doc an agent needs to *use* the engine.
+> Read THIS file first to USE the engine. Before EXTENDING it (new scenarios,
+> seeds, techniques, bypasses, or touching any invariant), read
+> `README_BEFORE_CONTRIBUTING.md` — it maps what exists, the four sanctioned
+> paths for adding cases, and the do-not-modify invariants (each guarded by a
+> named test).
 > Everything else (`devdocs/`, README) is design/background for humans and may
 > drift from code. **The code in `src/jb_ape/` is the source of truth.**
 

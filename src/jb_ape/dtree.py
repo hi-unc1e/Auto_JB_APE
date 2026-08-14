@@ -57,6 +57,7 @@ class TargetState:
     model_family: str | None = None
     last_blocked_mode: FailureMode | None = None
     hints: list = field(default_factory=list)          # operator steering (devdocs/17)
+    disabled_families: set = field(default_factory=set)  # structural steer: blocked T-*
 
     @classmethod
     def from_profile(cls, profile, track: Track) -> TargetState:
@@ -242,6 +243,9 @@ def route(state: TargetState, leaves: list[Leaf]) -> list[Leaf]:
     """
     live: list[Leaf] = []
     for leaf in leaves:
+        if state.disabled_families and any(
+                f in state.disabled_families for f in leaf.families):
+            continue  # structurally disabled by the operator (devdocs/17 §4)
         p = leaf.problem
         if p.startswith("condition:"):
             cond = p.split(":", 1)[1]

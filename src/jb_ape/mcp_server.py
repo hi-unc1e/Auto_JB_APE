@@ -55,8 +55,9 @@ def mcp_status_engagement(eid: str) -> dict:
     return get_engagement(eid).status()
 
 
-def mcp_steer_engagement(eid: str, hint: str) -> dict:
-    return get_engagement(eid).steer(hint)
+def mcp_steer_engagement(eid: str, hint: str,
+                         disable: list[str] | None = None) -> dict:
+    return get_engagement(eid).steer(hint, disable=disable)
 
 
 def mcp_report_engagement(eid: str) -> dict:
