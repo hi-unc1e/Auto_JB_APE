@@ -100,6 +100,9 @@ class Planner:
     armory: object | None = None  # jb_ape.armory.Armory (typed loosely to avoid import cycle)
     explore_eps_start: float = 0.3
     explore_eps_end: float = 0.05
+    # Wei failure-mode feedback (devdocs/14 §1): set by the generator after a
+    # round was blocked — plan_round then prefers the OPPOSITE mode's techniques.
+    last_blocked_mode: object | None = None  # jailbreak.FailureMode | None
 
     def _candidate_techniques(self) -> list[Technique]:
         techs = technique_for_track(self.objective.track)
@@ -127,6 +130,22 @@ class Planner:
 
         techs = self._candidate_techniques()
         arm_ids = [t.tid for t in techs]
+
+        # Wei failure-mode awareness (devdocs/14 §1): when the last round was
+        # blocked while using techniques of one failure mode, prefer the OTHER
+        # mode this round — same-mode repetition is the definition of insanity.
+        # (Before this, technique_failure_mode() was dead code.)
+        from jb_ape.jailbreak import FailureMode, technique_failure_mode
+
+        if self.last_blocked_mode is FailureMode.COMPETING:
+            alt = [t for t in techs if technique_failure_mode(t.tid) is FailureMode.MISMATCHED]
+            if alt:
+                techs, arm_ids = alt, [t.tid for t in alt]
+        elif self.last_blocked_mode is FailureMode.MISMATCHED:
+            alt = [t for t in techs if technique_failure_mode(t.tid) is FailureMode.COMPETING]
+            if alt:
+                techs, arm_ids = alt, [t.tid for t in alt]
+
         eps = self._eps(round_idx, max_rounds)
         chosen_id = self.bandit.select(self.objective.track, arm_ids, explore_eps=eps)
         chosen = next((t for t in techs if t.tid == chosen_id), techs[0])

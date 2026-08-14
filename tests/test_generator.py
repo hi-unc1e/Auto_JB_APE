@@ -28,7 +28,9 @@ class TestGeneratorEndToEnd(unittest.TestCase):
         gen = Generator(
             objective=obj, browser=browser, judge=judge,
             rewriter=rewriter, planner=planner, bandit=bandit,
-            config=RunConfig(bundle_size=2, max_rounds=3, seed=0),
+            # run_recon=False isolates the attack loop (recon consumes scripted
+            # responses first otherwise; recon itself is tested in test_recon).
+            config=RunConfig(bundle_size=2, max_rounds=3, seed=0, run_recon=False),
         )
         return gen, browser
 

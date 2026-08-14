@@ -126,7 +126,10 @@ class Generator:
         # --- Recon phase (devdocs/02 §7) ----------------------------------------
         recon_cost = 0
         recon_profile = None
-        if self.config.run_recon and self.armory is not None:
+        # Recon works with or without an armory: Recon.load_probes() falls back
+        # to built-in FALLBACK_PROBES when armory is None (codex review P1 —
+        # recon must not be silently disabled just because armory is off).
+        if self.config.run_recon:
             from jb_ape.recon import Recon
 
             recon = Recon(armory=self.armory)
@@ -137,6 +140,9 @@ class Generator:
             submissions += recon_cost
             # Feed the discovered profile to the planner so it targets the right layer.
             self.planner.profile = recon_report.profile
+            # And to the rewriter so it can skip PPL-filtered bypass families
+            # (devdocs/14 §4 — ppl_filter_active must not be a dead signal).
+            self.rewriter.profile = recon_report.profile
             recon_profile = recon_report.profile
             self.last_recon = recon_report
         else:
@@ -211,14 +217,22 @@ class Generator:
                     self.objective.track, rec.arm_id, rec.achieved, rec.score
                 )
 
-                if (
+                # Submission gate (devdocs/01 §3): achieved AND FPR below the
+                # OBJECTIVE's threshold (was hardcoded 0.10 — pi/codex flagged
+                # the dead knob; the objective's tighter bar is now honored).
+                gate_passed = (
                     result.achieved
-                    and self.config.confirm_on_success
-                    and result.can_submit  # submission gate (devdocs/01 §3)
-                ):
-                    self.browser.confirm_submit()
-                    rec.confirmed = True
-                    confirmed += 1
+                    and result.false_positive_risk
+                    < self.objective.submit_max_false_positive_risk
+                )
+                if gate_passed:
+                    # confirm_on_success only suppresses the browser confirm
+                    # call — it must NOT flip the achieved verdict (codex P1:
+                    # a dry-run config change made runs report failure on wins).
+                    if self.config.confirm_on_success:
+                        self.browser.confirm_submit()
+                        rec.confirmed = True
+                        confirmed += 1
                     return RunReport(
                         achieved=True, rounds=round_idx + 1,
                         submissions=submissions, confirmed=confirmed,
@@ -232,6 +246,20 @@ class Generator:
             # bug (grok review P0-1): prune only marks below-floor nodes as
             # pruned, NOT beam-cut losers, so beam_width had no effect.
             self._survivors = prune(nodes, beam_width=self.config.beam_width)
+
+            # Wei failure-mode feedback (devdocs/14 §1): if the whole round was
+            # blocked (nothing achieved) and the round's variants were mostly of
+            # one failure mode, tell the planner to switch modes next round.
+            if not any(n.achieved for n in nodes) and nodes:
+                from jb_ape.jailbreak import FailureMode, technique_failure_mode
+
+                modes = [technique_failure_mode(n.variant.technique) for n in nodes]
+                comp = sum(1 for m in modes if m is FailureMode.COMPETING)
+                mis = sum(1 for m in modes if m is FailureMode.MISMATCHED)
+                if comp > mis:
+                    self.planner.last_blocked_mode = FailureMode.COMPETING
+                elif mis > comp:
+                    self.planner.last_blocked_mode = FailureMode.MISMATCHED
 
         # Report the ACTUAL number of rounds executed, not max_rounds (grok P0-6).
         return RunReport(

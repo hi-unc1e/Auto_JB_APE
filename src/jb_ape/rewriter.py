@@ -82,6 +82,11 @@ class Rewriter:
         self.llm = llm
         self.keep_threshold = keep_threshold
         self.use_v2_prompt = use_v2_prompt
+        # Optional recon-derived defense profile (devdocs/14 §4). When the
+        # target runs a perplexity filter, high-PPL encoding bypasses
+        # (B-I2 base64 / B-I5 homoglyph) get filtered at the door — skip them.
+        # The generator syncs this after recon.
+        self.profile = None
 
     def rewrite(
         self,
@@ -91,6 +96,10 @@ class Rewriter:
     ) -> list[Variant]:
         """Produce up to ``k`` variants countering the feedback's layers."""
         bypasses = recommend_bypasses(feedback)
+        # PPL-aware filtering (devdocs/14 §4): drop high-perplexity encodings
+        # when recon detected a perplexity filter.
+        if getattr(self.profile, "ppl_filter_active", False):
+            bypasses = [b for b in bypasses if b not in {"B-I2", "B-I5"}]
         variants: list[Variant] = []
 
         # Mechanical path first (cheap, deterministic). Dispatch across both
