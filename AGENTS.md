@@ -60,6 +60,16 @@ report = quick_run(
 - For Agent/Workflow targets, pass `hijack_gate=` to credit tool-call hijacks.
 - Returns a `RunReport`: see `render_report(report)` for a human-readable summary.
 
+## Being called by other agents (devdocs/17)
+
+The unit of invocation is a stateful **Engagement**: `start → step → verdict →
+steer → report`, snapshot-persisted under `armory/engagements/` (survives
+server restarts). Transports: MCP (`python -m jb_ape.mcp_server`, async-job
+tools), CLI (`jb-ape engage start|step|status|steer|report`), and the host
+Skill at `skills/jb-ape/SKILL.md`. The tool returns VERDICTS
+(level/score/evidence/canary) from its built-in judge — consume them, don't
+re-judge; `steer` rides as `[operator context]` on subsequent cases.
+
 ## Wiring discipline (MANDATORY when adding any capability)
 
 This codebase had **two rounds** of the same disease: a signal/feature was

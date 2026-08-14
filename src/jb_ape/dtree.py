@@ -56,6 +56,7 @@ class TargetState:
     agent_surface: bool = True                         # tools/skills present?
     model_family: str | None = None
     last_blocked_mode: FailureMode | None = None
+    hints: list = field(default_factory=list)          # operator steering (devdocs/17)
 
     @classmethod
     def from_profile(cls, profile, track: Track) -> TargetState:
@@ -155,6 +156,12 @@ class Leaf:
         elif nest_mode == "S-STORY":
             body = nest(STORY, body)
             chain.append("S-STORY")
+        # Operator steering (devdocs/17 §2): the outer agent's hint rides as a
+        # bracketed context line on every subsequent emission — observable,
+        # testable, and honestly documented (this IS the steer semantics).
+        if getattr(state, "hints", None):
+            body += "\n[operator context] " + str(state.hints[-1])
+            chain.append("STEER")
         return Variant(payload=body, technique=(tech.tid if tech else "RAW"),
                        scenario=nest_mode or "",
                        bypasses=[b for b in self.bypasses

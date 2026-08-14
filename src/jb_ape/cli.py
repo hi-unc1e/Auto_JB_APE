@@ -176,6 +176,35 @@ def cmd_sweep(args) -> int:
     return 0
 
 
+def cmd_engage(args) -> int:
+    import json
+
+    from jb_ape.engagement import EngagementSpec, get_engagement
+
+    if args.engage_cmd == "start":
+        spec = EngagementSpec(
+            url=args.url, scenario=args.scenario, track=args.track,
+            goal=args.goal, adapter=args.adapter, llm_model=args.llm_model,
+            llm_base_url=args.llm_base_url, budget=args.budget,
+            max_rounds=args.rounds, planner_kind=args.planner,
+            armory_root="armory",
+        )
+        from jb_ape.engagement import create_engagement
+
+        print(json.dumps(create_engagement(spec).status(), ensure_ascii=False, indent=1))
+        return 0
+    eng = get_engagement(args.id)
+    if args.engage_cmd == "step":
+        print(json.dumps(eng.step(rounds=args.rounds), ensure_ascii=False, indent=1))
+    elif args.engage_cmd == "status":
+        print(json.dumps(eng.status(), ensure_ascii=False, indent=1))
+    elif args.engage_cmd == "steer":
+        print(json.dumps(eng.steer(args.hint), ensure_ascii=False, indent=1))
+    elif args.engage_cmd == "report":
+        print(eng.report_md())
+    return 0
+
+
 def _write(out_dir: str, name: str, text: str) -> None:
     base = Path(out_dir)
     base.mkdir(parents=True, exist_ok=True)
@@ -209,6 +238,31 @@ def build_parser() -> argparse.ArgumentParser:
                     help="exit 1 if objective not achieved")
     pu.add_argument("--planner", default="bandit", choices=["bandit", "tree"])
     pu.add_argument("--out", help="write the markdown report to this directory")
+
+    pe = sub.add_parser("engage", help="stateful engagement (MCP-equivalent)")
+    pes = pe.add_subparsers(dest="engage_cmd", required=True)
+    st = pes.add_parser("start")
+    st.add_argument("--url", required=True)
+    st.add_argument("--scenario")
+    st.add_argument("--track", default="office")
+    st.add_argument("--goal")
+    st.add_argument("--adapter", default="dryrun",
+                    choices=["dryrun", "browser", "llm"])
+    st.add_argument("--llm-model")
+    st.add_argument("--llm-base-url")
+    st.add_argument("--budget", type=int, default=20)
+    st.add_argument("--rounds", type=int, default=20)
+    st.add_argument("--planner", default="tree", choices=["bandit", "tree"])
+    stp = pes.add_parser("step")
+    stp.add_argument("--id", required=True)
+    stp.add_argument("--rounds", type=int, default=1)
+    sts = pes.add_parser("status")
+    sts.add_argument("--id", required=True)
+    stg = pes.add_parser("steer")
+    stg.add_argument("--id", required=True)
+    stg.add_argument("--hint", required=True)
+    strp = pes.add_parser("report")
+    strp.add_argument("--id", required=True)
 
     ps = sub.add_parser("sweep", help="run every scenario (optionally per track)")
     _common(ps, url=True)
@@ -244,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_run(args)
     if args.cmd == "sweep":
         return cmd_sweep(args)
+    if args.cmd == "engage":
+        return cmd_engage(args)
     return 2
 
 

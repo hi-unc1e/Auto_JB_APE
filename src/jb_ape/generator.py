@@ -79,6 +79,23 @@ class RunReport:
     recon_cost: int = 0
 
 
+@dataclass
+class RunCtx:
+    """Mutable state of one engagement run (devdocs/17 §2). ``Generator.run``
+    loops ``step_round`` over it; the stateful API (engagement.py) steps it
+    externally, snapshots it, and resumes across process restarts."""
+
+    records: list[RunRecord] = field(default_factory=list)
+    confirmed: int = 0
+    submissions: int = 0
+    rounds_done: int = 0
+    best: RunRecord | None = None
+    recon_profile: object | None = None
+    recon_cost: int = 0
+    finished: bool = False
+    report: RunReport | None = None
+
+
 class Generator:
     """Closed-loop payload generator. Construct with the objective + clients;
     call ``run`` to execute the full search."""
@@ -115,158 +132,135 @@ class Generator:
         """Execute the search against ``url`` with a submission ``budget``.
 
         ``recon_budget`` is reserved from ``budget`` for the reconnaissance phase
-        (devdocs/02 §7): before attacking, the engine reverse-engineers the
-        target's defense layers so the planner doesn't attack blind."""
-        records: list[RunRecord] = []
-        confirmed = 0
-        submissions = 0
-        rounds_done = 0
-        best: RunRecord | None = None
+        (devdocs/02 §7). Batch API — the stateful/interactive equivalent is
+        ``step_round`` (used by engagement.py, devdocs/17)."""
+        ctx = self.prepare(url, budget, recon_budget)
+        while not ctx.finished:
+            if ctx.rounds_done >= self.config.max_rounds:
+                break
+            if ctx.submissions >= budget:
+                break
+            self.step_round(ctx, url, budget)
+        return ctx.report or self._final_report(ctx)
 
-        # --- Recon phase (devdocs/02 §7) ----------------------------------------
-        recon_cost = 0
-        recon_profile = None
-        # Recon works with or without an armory: Recon.load_probes() falls back
-        # to built-in FALLBACK_PROBES when armory is None (codex review P1 —
-        # recon must not be silently disabled just because armory is off).
+    def prepare(self, url: str, budget: int = 60,
+                recon_budget: int = 6) -> RunCtx:
+        """Recon + open; returns the mutable run context (devdocs/17 §2)."""
+        ctx = RunCtx()
         if self.config.run_recon:
             from jb_ape.recon import Recon
 
             recon = Recon(armory=self.armory)
-            # Guard against recon exceeding the total budget (pi review P2-2).
             actual_recon_budget = min(recon_budget, max(0, budget))
             recon_report = recon.run(self.browser, url, budget=actual_recon_budget)
-            recon_cost = recon_report.cost
-            submissions += recon_cost
-            # Feed the discovered profile to the planner so it targets the right layer.
+            ctx.recon_cost = recon_report.cost
+            ctx.submissions += recon_report.cost
             self.planner.profile = recon_report.profile
-            # And to the rewriter so it can skip PPL-filtered bypass families
-            # (devdocs/14 §4 — ppl_filter_active must not be a dead signal).
             self.rewriter.profile = recon_report.profile
-            recon_profile = recon_report.profile
+            ctx.recon_profile = recon_report.profile
             self.last_recon = recon_report
         else:
-            with contextlib.suppress(Exception):  # noqa: BLE001 — DryRunClient always opens fine
+            with contextlib.suppress(Exception):  # noqa: BLE001
                 self.browser.open(url)
+        return ctx
 
-        for round_idx in range(self.config.max_rounds):
-            if submissions >= budget:
+    def step_round(self, ctx: RunCtx, url: str, budget: int) -> None:
+        """ONE round: plan → gate → submit/judge/record/persist/reward →
+        prune/blocked-mode. Mutates ``ctx``; sets ``ctx.report`` on a gated win
+        (ctx.finished=True). Callable repeatedly = the stateful API."""
+        round_idx = ctx.rounds_done
+        ctx.rounds_done += 1
+        seeds = self.planner.plan_round(
+            round_idx, self.config.max_rounds, self.config.bundle_size
+        )
+        frontier = seeds if round_idx == 0 else self._expand(seeds, ctx.records)
+        frontier = _dedupe_variants(frontier)
+
+        if self.judge_llm_for_gate is not None:
+            frontier = [
+                v for v in frontier
+                if _on_topic(v.payload, self.objective.goal, self.judge_llm_for_gate)
+            ]
+            if not frontier:
+                return
+
+        nodes: list[TreeNode] = []
+        for var in frontier:
+            if ctx.submissions >= budget:
                 break
-            rounds_done = round_idx + 1
-            seeds = self.planner.plan_round(
-                round_idx, self.config.max_rounds, self.config.bundle_size
+            sub = self.browser.submit_payload(var.payload)
+            ctx.submissions += 1
+            result = self.judge.evaluate(sub, variant_bypasses=var.bypasses)
+            rec = RunRecord(
+                variant=var, submission=sub, level=result.level,
+                achieved=result.achieved, score=result.quality_score,
+                arm_id=_arm_id(var),
+                resistance_hit=set(result.resistance_hit),
+                improve_hint=result.improve_hint,
+                refusal_type=result.refusal_type,
             )
-            # Grow a tree of variants: this round's seeds + rewriter expansions
-            # of last round's survivors (if any).
-            frontier = seeds if round_idx == 0 else self._expand(seeds, records)
-            frontier = _dedupe_variants(frontier)
+            ctx.records.append(rec)
+            nodes.append(TreeNode(
+                variant=var, score=result.quality_score, achieved=result.achieved,
+                resistance_hit=set(result.resistance_hit),
+                improve_hint=result.improve_hint,
+                refusal_type=result.refusal_type,
+            ))
+            ctx.best = _update_best(ctx.best, rec)
 
-            # --- On-topic gate (TAP Phase-1, devdocs/12 §2.2) -------------------
-            # Before spending a target query, prune drifted prompts. The gate is
-            # permissive without an LLM, so it never blocks offline runs.
-            if self.judge_llm_for_gate is not None:
-                frontier = [
-                    v for v in frontier
-                    if _on_topic(v.payload, self.objective.goal, self.judge_llm_for_gate)
-                ]
-                if not frontier:
-                    continue
+            if self.armory is not None and rec.level in {"S", "A", "B"}:
+                self.armory.log_finding(self.objective.track, {
+                    "level": rec.level, "score": rec.score,
+                    "achieved": rec.achieved, "arm_id": rec.arm_id,
+                    "payload": var.payload,
+                    "mutation_chain": var.mutation_chain,
+                    "technique": var.technique,
+                    "bypasses": var.bypasses,
+                    "improve_hint": result.improve_hint,
+                })
 
-            # Evaluate the frontier; collect tree nodes.
-            nodes: list[TreeNode] = []
-            for var in frontier:
-                if submissions >= budget:
-                    break
-                sub = self.browser.submit_payload(var.payload)
-                submissions += 1
-                # Pass the variant's bypasses so the judge only decodes using
-                # encodings actually requested (codex P0: prevent false wins).
-                result = self.judge.evaluate(sub, variant_bypasses=var.bypasses)
-                rec = RunRecord(
-                    variant=var, submission=sub, level=result.level,
-                    achieved=result.achieved, score=result.quality_score,
-                    arm_id=_arm_id(var),
-                    resistance_hit=set(result.resistance_hit),
-                    improve_hint=result.improve_hint,
-                    refusal_type=result.refusal_type,
+            self.bandit.reward(
+                self.objective.track, rec.arm_id, rec.achieved, rec.score
+            )
+
+            gate_passed = (
+                result.achieved
+                and result.false_positive_risk
+                < self.objective.submit_max_false_positive_risk
+            )
+            if gate_passed:
+                if self.config.confirm_on_success:
+                    self.browser.confirm_submit()
+                    rec.confirmed = True
+                    ctx.confirmed += 1
+                ctx.report = RunReport(
+                    achieved=True, rounds=ctx.rounds_done,
+                    submissions=ctx.submissions, confirmed=ctx.confirmed,
+                    best=ctx.best, records=ctx.records,
+                    recon_profile=ctx.recon_profile, recon_cost=ctx.recon_cost,
                 )
-                records.append(rec)
-                nodes.append(TreeNode(
-                    variant=var, score=result.quality_score, achieved=result.achieved,
-                    resistance_hit=set(result.resistance_hit),
-                    improve_hint=result.improve_hint,
-                    refusal_type=result.refusal_type,
-                ))
-                best = _update_best(best, rec)
+                ctx.finished = True
+                return
 
-                # Persist every judged signal (armory/runs, devdocs/armory README).
-                # Best-effort: never let logging break the run.
-                if self.armory is not None and rec.level in {"S", "A", "B"}:
-                    self.armory.log_finding(self.objective.track, {
-                        "level": rec.level, "score": rec.score,
-                        "achieved": rec.achieved, "arm_id": rec.arm_id,
-                        "payload": var.payload,
-                        "mutation_chain": var.mutation_chain,
-                        "technique": var.technique,
-                        "bypasses": var.bypasses,
-                        "improve_hint": result.improve_hint,
-                    })
+        self._survivors = prune(nodes, beam_width=self.config.beam_width)
 
-                # Bandit feedback (devdocs/05 §5).
-                self.bandit.reward(
-                    self.objective.track, rec.arm_id, rec.achieved, rec.score
-                )
+        if not any(n.achieved for n in nodes) and nodes:
+            from jb_ape.jailbreak import FailureMode, technique_failure_mode
 
-                # Submission gate (devdocs/01 §3): achieved AND FPR below the
-                # OBJECTIVE's threshold (was hardcoded 0.10 — pi/codex flagged
-                # the dead knob; the objective's tighter bar is now honored).
-                gate_passed = (
-                    result.achieved
-                    and result.false_positive_risk
-                    < self.objective.submit_max_false_positive_risk
-                )
-                if gate_passed:
-                    # confirm_on_success only suppresses the browser confirm
-                    # call — it must NOT flip the achieved verdict (codex P1:
-                    # a dry-run config change made runs report failure on wins).
-                    if self.config.confirm_on_success:
-                        self.browser.confirm_submit()
-                        rec.confirmed = True
-                        confirmed += 1
-                    return RunReport(
-                        achieved=True, rounds=round_idx + 1,
-                        submissions=submissions, confirmed=confirmed,
-                        best=best, records=records,
-                        recon_profile=recon_profile, recon_cost=recon_cost,
-                    )
+            modes = [technique_failure_mode(n.variant.technique) for n in nodes]
+            comp = sum(1 for m in modes if m is FailureMode.COMPETING)
+            mis = sum(1 for m in modes if m is FailureMode.MISMATCHED)
+            if comp > mis:
+                self.planner.last_blocked_mode = FailureMode.COMPETING
+            elif mis > comp:
+                self.planner.last_blocked_mode = FailureMode.MISMATCHED
 
-            # TAP-style prune for the next round (devdocs/05 §6.1).
-            # Use the RETURNED survivors — prune() returns the top-`beam_width`
-            # alive nodes. The old `[n for n in nodes if not n.pruned]` was a
-            # bug (grok review P0-1): prune only marks below-floor nodes as
-            # pruned, NOT beam-cut losers, so beam_width had no effect.
-            self._survivors = prune(nodes, beam_width=self.config.beam_width)
-
-            # Wei failure-mode feedback (devdocs/14 §1): if the whole round was
-            # blocked (nothing achieved) and the round's variants were mostly of
-            # one failure mode, tell the planner to switch modes next round.
-            if not any(n.achieved for n in nodes) and nodes:
-                from jb_ape.jailbreak import FailureMode, technique_failure_mode
-
-                modes = [technique_failure_mode(n.variant.technique) for n in nodes]
-                comp = sum(1 for m in modes if m is FailureMode.COMPETING)
-                mis = sum(1 for m in modes if m is FailureMode.MISMATCHED)
-                if comp > mis:
-                    self.planner.last_blocked_mode = FailureMode.COMPETING
-                elif mis > comp:
-                    self.planner.last_blocked_mode = FailureMode.MISMATCHED
-
-        # Report the ACTUAL number of rounds executed, not max_rounds (grok P0-6).
+    def _final_report(self, ctx: RunCtx) -> RunReport:
         return RunReport(
-            achieved=False, rounds=rounds_done,
-            submissions=submissions, confirmed=confirmed,
-            best=best, records=records,
-            recon_profile=recon_profile, recon_cost=recon_cost,
+            achieved=False, rounds=ctx.rounds_done,
+            submissions=ctx.submissions, confirmed=ctx.confirmed,
+            best=ctx.best, records=ctx.records,
+            recon_profile=ctx.recon_profile, recon_cost=ctx.recon_cost,
         )
 
     # -- internals ----------------------------------------------------------------
