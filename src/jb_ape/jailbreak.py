@@ -72,6 +72,14 @@ TECHNIQUE_FAILURE_MODE: dict[str, FailureMode] = {
     "T-D3": FailureMode.COMPETING,
     # E — tunneling: competing (dilute the safety instruction's weight)
     "T-E1": FailureMode.COMPETING,
+    # F — agentic composition (devdocs/15): harmful goal assembled across
+    # steps/artifacts/entities. Exploits the model's instruction-following
+    # across a workflow — the safety judgment never sees one clearly-harmful
+    # ask → competing.
+    "T-F1": FailureMode.COMPETING,
+    "T-F2": FailureMode.COMPETING,
+    "T-F3": FailureMode.COMPETING,
+    "T-F4": FailureMode.COMPETING,
 }
 
 # Bypass failure modes (input-side encoding → mismatched generalization).
