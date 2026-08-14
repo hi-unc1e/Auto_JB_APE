@@ -8,6 +8,9 @@ license = { text = "MIT" }
 authors = [{ name = "unc1e" }]
 dependencies = []
 
+[project.scripts]
+jb-ape = "jb_ape.cli:main"
+
 [project.optional-dependencies]
 # 运行时（LLM + 浏览器）依赖。测试与静态扫描不强制安装。
 runtime = [

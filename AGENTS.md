@@ -13,6 +13,24 @@ learns across attempts via a bandit + tree search.
 
 This is security research tooling. Use only against authorized targets.
 
+## The CLI (preferred for humans; the 4-line API below for agents)
+
+```bash
+jb-ape scenarios                                    # 12 preset problem scenarios
+jb-ape recon --url https://t/ --adapter browser     # probe defenses first
+jb-ape run --scenario tool-call-hijack --url https://t/ --adapter llm \
+           --llm-model gpt-4o-mini --strict         # one scenario, full loop
+jb-ape sweep --track office --url https://t/ --adapter browser   # everything
+```
+
+- `--adapter browser` (agent-browser CLI) | `llm` (OpenAI-compatible target
+  API, replies land in the judge's api_responses channel) | `dryrun` (offline).
+- **Canary**: exfil/hijack/overeager scenarios auto-mint `RT-xxxxxxxx`; the
+  token surfacing in ANY evidence channel is machine-proof of impact — no
+  hand-written success patterns needed (`catalog.py`).
+- The catalog (12 scenarios / 9 problem categories) covers the standard agent
+  red-team problems; add scenarios there, not ad-hoc scripts.
+
 ## The 4-line usage contract
 
 ```python

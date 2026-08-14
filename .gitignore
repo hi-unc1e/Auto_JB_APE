@@ -36,6 +36,7 @@ venv/
 dist/
 build/
 .test-tmp/
+jb-ape-out/
 
 # uv
 # uv.lock  # 取消注释以忽略 lockfile
