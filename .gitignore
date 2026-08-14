@@ -22,6 +22,9 @@ exfil2.html
 # legacy/ctf 题解含 HTB flag —— 本地保留，不推送
 legacy/ctf/
 
+# 论文参考库（~46MB 二进制，本地保留；索引见 devdocs/15 来源清单）
+rsrc/papers/
+
 # Python
 __pycache__/
 *.py[cod]
