@@ -37,6 +37,44 @@ report = quick_run(
 - For Agent/Workflow targets, pass `hijack_gate=` to credit tool-call hijacks.
 - Returns a `RunReport`: see `render_report(report)` for a human-readable summary.
 
+## Wiring discipline (MANDATORY when adding any capability)
+
+This codebase had **two rounds** of the same disease: a signal/feature was
+produced (detected, computed, stored) but its consumer was never wired — the
+capability was advertised yet dead (bandit rewarding arms it never samples,
+recon profile read by no one, a gate LLM never called). A 3-way CLI review
+(codex/pi/grok) + a self-audit each caught fresh instances.
+
+**Rule: a signal with no observable behavior change is dead code, no matter
+how well its producer is unit-tested.**
+
+Before any capability counts as done, answer in the PR/commit:
+1. **Producer** — where is the signal born? (e.g. `recon` sets `ppl_filter_active`)
+2. **Consumer** — what behavior reads it? (e.g. `rewriter` drops `B-I2`)
+3. **Contract test** — a with/without test proving the behavior DIFFERS:
+   `tests/test_signal_contracts.py` is the pattern (14 contracts, one per
+   signal). Copy the shape: `without = f(x)`, `with_ = f(x, signal)`,
+   `assertNotEqual` in the expected direction.
+
+The current signal inventory (keep in sync when adding one):
+
+| # | Signal | Producer → Consumer |
+|---|--------|---------------------|
+| 1 | recon DefenseProfile | recon → planner round-0 payload transformation |
+| 2 | ppl_filter_active | recon → rewriter drops high-PPL bypasses |
+| 3 | resistance_hit | judge → rewriter layer targeting |
+| 4 | bandit reward | generator → subsequent selection |
+| 5 | armory priors | armory → bandit → selection bias |
+| 6 | hijack_gate | facade → judge S-level verdict |
+| 7 | submit_max_false_positive_risk | objective → generator submission gate |
+| 8 | variant bypasses | variant → judge decode selectivity |
+| 9 | approx_payloads | objective → judge PM/APM verdict |
+| 10 | last_blocked_mode | generator → planner Wei-mode pool |
+| 11 | gate_llm verdict | on-topic gate → frontier pruning |
+| 12 | armory chains | armory → round-0 seeds |
+| 13 | success_patterns | objective → machine-check S-level |
+| 14 | confirm_on_success | config → confirm call only, never the verdict |
+
 ## What an agent should and should NOT do
 
 **Do:**

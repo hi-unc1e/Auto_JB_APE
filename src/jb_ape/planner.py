@@ -174,22 +174,52 @@ class Planner:
         return seeds[: max(bundle_size, len(seeds))]
 
     def _apply_recon_bypasses(self, variant: Variant) -> Variant:
-        """Fold recon-detected layers into a seed variant by appending the
-        recommended bypass ids. The actual payload text is transformed later
-        by the rewriter/mechanical generators; this just records intent so the
-        bandit attributes correctly and the rewriter knows what to apply."""
+        """Fold recon-detected layers into a seed variant — and ACTUALLY
+        transform the payload text (grok P0-2: the earlier version only
+        stamped bypass metadata, so round-0 seeds still hit L1 raw).
+
+        Applies the top-priority mechanical bypass per detected layer (max 2
+        layers, to bound semantic drift), so the FIRST submission already
+        counters the defenses recon discovered. Targets come from the recon
+        wordlist when available, else the built-in defaults."""
+        from jb_ape.defense import variant_bundle
         from jb_ape.rewriter import _LAYER_TO_BYPASSES
-        extra: list[str] = []
-        for layer in self.profile.detected_layers:  # type: ignore[union-attr]
-            extra.extend(_LAYER_TO_BYPASSES.get(layer, []))
-        if not extra:
+
+        if self.profile is None:
             return variant
-        bypasses = list(dict.fromkeys(variant.bypasses + extra))
+        layers = list(self.profile.detected_layers)
+        if not layers:
+            return variant
+        targets = set(getattr(self.profile, "l1_wordlist", None) or set()) or None
+        body = variant.payload
+        applied: list[str] = []
+        for layer in layers[:2]:  # cap: 2 layers max
+            for bid in _LAYER_TO_BYPASSES.get(layer, []):
+                # Fixpoint loop: variant_bundle replaces ONE target word per
+                # call (it returns a per-word variant list); iterate until no
+                # word remains, so ALL recon-discovered L1 words are sanitized
+                # (contract C1: not just the first).
+                changed = False
+                for _ in range(4):  # bound: at most 4 words per pass
+                    try:
+                        bodies = variant_bundle(body, bid, targets=targets, k=1)
+                    except (TypeError, ValueError):
+                        bodies = []
+                    if not bodies:
+                        break
+                    body = bodies[0]
+                    changed = True
+                if changed:
+                    applied.append(str(bid))
+                    break
+        bypasses = list(dict.fromkeys(variant.bypasses + applied))
+        if not applied:
+            return variant  # nothing transformable — don't pretend we did
         chain = variant.mutation_chain + ["RECON:" + ",".join(
-            layer.value for layer in self.profile.detected_layers  # type: ignore[union-attr]
-        )]
+            layer.value for layer in layers
+        )] + applied
         return Variant(
-            payload=variant.payload, technique=variant.technique,
+            payload=body, technique=variant.technique,
             scenario=variant.scenario, bypasses=bypasses,
             mutation_chain=chain, depth=variant.depth,
         )
