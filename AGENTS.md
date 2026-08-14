@@ -28,6 +28,11 @@ jb-ape sweep --track office --url https://t/ --adapter browser   # everything
 - **Canary**: exfil/hijack/overeager scenarios auto-mint `RT-xxxxxxxx`; the
   token surfacing in ANY evidence channel is machine-proof of impact — no
   hand-written success patterns needed (`catalog.py`).
+- `--planner tree` routes generation through the **decision tree**
+  (`dtree.py`, devdocs/16): observations (recon layers, Wei blocked-mode)
+  select branches; leaves compose technique×bypass×overlay and emit DISTINCT
+  cases indefinitely (cyclic depth space + crossover fallback). Default
+  `--planner bandit` keeps the flat loop.
 - The catalog (12 scenarios / 9 problem categories) covers the standard agent
   red-team problems; add scenarios there, not ad-hoc scripts.
 

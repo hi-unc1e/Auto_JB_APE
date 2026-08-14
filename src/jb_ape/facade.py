@@ -34,6 +34,7 @@ def build_engine(
     gate_llm: LLMClient | None = None,
     hijack_gate=None,
     hijack_success_markers: list[str] | None = None,
+    planner_kind: str = "bandit",
 ) -> Generator:
     """Wire the full wisdom engine. ``generator_llm`` drives the rewriter;
     ``judge_llm`` drives tier-3 adjudication; ``gate_llm`` drives the TAP
@@ -61,7 +62,12 @@ def build_engine(
         hijack_gate = HijackGate(success_markers=hijack_success_markers)
     armory = Armory(armory_root) if armory_root else None
     bandit = Bandit()
-    planner = Planner(objective=objective, bandit=bandit, armory=armory)
+    if planner_kind == "tree":
+        from jb_ape.dtree import TreeWalker
+
+        planner = TreeWalker(objective=objective, bandit=bandit)
+    else:
+        planner = Planner(objective=objective, bandit=bandit, armory=armory)
     rewriter = Rewriter(objective=objective, llm=generator_llm)
     judge = Judge(objective=objective, llm=judge_llm, tech_keywords=tech_keywords,
                   hijack_gate=hijack_gate)
@@ -86,6 +92,7 @@ def quick_run(
     gate_llm: LLMClient | None = None,
     hijack_gate=None,
     hijack_success_markers: list[str] | None = None,
+    planner_kind: str = "bandit",
 ):
     """One-call convenience: build the engine and run it against ``url``."""
     gen = build_engine(
@@ -93,5 +100,6 @@ def quick_run(
         generator_llm=generator_llm, judge_llm=judge_llm, config=config,
         armory_root=armory_root, tech_keywords=tech_keywords, gate_llm=gate_llm,
         hijack_gate=hijack_gate, hijack_success_markers=hijack_success_markers,
+        planner_kind=planner_kind,
     )
     return gen.run(url, budget=budget)

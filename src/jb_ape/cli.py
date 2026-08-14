@@ -132,6 +132,7 @@ def cmd_run(args) -> int:
                          bundle_size=args.bundle, max_rounds=args.rounds),
         armory_root=args.armory,
         hijack_success_markers=markers or None,
+        planner_kind=args.planner,
     )
     out = render_report(rep, url=args.url)
     print(out)
@@ -161,6 +162,7 @@ def cmd_sweep(args) -> int:
             config=RunConfig(run_recon=False, bundle_size=2, max_rounds=2),
             armory_root=args.armory,
             hijack_success_markers=markers or None,
+            planner_kind=args.planner,
         )
         rows.append((sc, rep))
         mark = "✅" if rep.achieved else "❌"
@@ -205,12 +207,15 @@ def build_parser() -> argparse.ArgumentParser:
     pu.add_argument("--no-recon", action="store_true")
     pu.add_argument("--strict", action="store_true",
                     help="exit 1 if objective not achieved")
+    pu.add_argument("--planner", default="bandit", choices=["bandit", "tree"])
     pu.add_argument("--out", help="write the markdown report to this directory")
 
     ps = sub.add_parser("sweep", help="run every scenario (optionally per track)")
     _common(ps, url=True)
     ps.add_argument("--track")
     ps.add_argument("--each-budget", type=int, default=5)
+    ps.add_argument("--planner", default="bandit",
+                    choices=["bandit", "tree"])
     ps.add_argument("--out")
     return p
 
