@@ -63,6 +63,58 @@ recon ──▶ plan ──▶ submit ──▶ judge ──▶ learn
   普通文本的 ROT13 伪造不出胜利。
 - **Learn** 沿**诊断出的**受阻层定向变异，剪枝决策树，轮换失败模式，并把 B 级以上链条落盘 armory。
 
+### 决策树视图 —— 流程 × 知识库 × LLM
+
+```mermaid
+flowchart TD
+    subgraph STATE["TargetState — what the tree observes"]
+        S1["recon profile<br/>layers L1/L2/L1out · PPL filter · tool surface"]
+        S2["judge verdicts<br/>level · blocked layer · failure mode"]
+        S3["operator steer<br/>hint · disabled families"]
+    end
+
+    R{"route()<br/>class split → defense conditions →<br/>failure-mode rotation → PPL constraint"}
+
+    subgraph LEAVES["21 leaves — one per problem pattern"]
+        LA["A · agent abuse (12)<br/>hijack · exfil · workflow · skill poisoning<br/>subagent spread · overeager · IDOR"]
+        LB["B · content jailbreak (4)<br/>sysprompt leak · forbidden codegen"]
+        LX["X · defense-conditioned (5)<br/>live only when the state shows L1/L2/L1out<br/>or a COMPETING block"]
+    end
+
+    subgraph KB["knowledge base"]
+        K1["technique library T-A…T-F<br/>bypasses B-I*/B-O* · overlay combos"]
+        K2["armory/ — seeds · priors ·<br/>effective chains · run logs"]
+    end
+
+    subgraph EMIT["emit() — mechanical composition, zero LLM"]
+        E1["technique × bypass × overlay<br/>× nesting + canary stamp"]
+        E2["hash dedup · depth cycling ·<br/>crossover → endless fresh cases"]
+    end
+
+    GL["gate LLM<br/>on-topic prune"]
+    T["target LLM agent<br/>browser / API adapter"]
+    J["judge — machine tiers first<br/>(patterns · canary · hijack),<br/>judge LLM only as tier 3"]
+    RW["rewriter — generator LLM<br/>mutates survivors by blocked layer"]
+    FB["TreeWalker.record()"]
+
+    STATE --> R
+    R --> LA & LB & LX
+    K1 --> E1
+    LA & LB & LX --> E1
+    E1 --> E2 --> GL --> T --> J
+    J -->|"S/A/B/C"| FB
+    FB -->|"solved · prune at 3 fails · Wei rotate"| S2
+    FB --> K2
+    E2 -.->|"survivors"| RW
+    RW -.->|"next-round variants"| E2
+```
+
+三根支柱，刻意分开：
+
+- **决策树是流程**：`route()` 读的是活观测——recon 层级、判定反馈、操作员 steer——计划每轮自我重塑，不回放固定清单。
+- **知识库是材料**：叶子从受版本管理的技术/绕过/叠加库组合案例；armory 持久化每条 B+ 链，并在 bandit 路径上供给种子与先验。
+- **LLM 只在边缘，不进核心**：gate LLM 在花预算前剪掉跑题案例，generator LLM 变异幸存者，judge LLM 只是第三级——S 级胜利从不需要 LLM 的意见。
+
 ## 快速开始
 
 ```bash

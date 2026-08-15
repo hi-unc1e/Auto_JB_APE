@@ -74,6 +74,64 @@ exit: achieved + gate passed → confirm | budget or rounds out → report(best)
 - **Learn** mutates along the *diagnosed* blocked layer, prunes the tree,
   rotates failure modes, and logs every B+ chain to the armory.
 
+### The decision tree — process × knowledge base × LLMs
+
+```mermaid
+flowchart TD
+    subgraph STATE["TargetState — what the tree observes"]
+        S1["recon profile<br/>layers L1/L2/L1out · PPL filter · tool surface"]
+        S2["judge verdicts<br/>level · blocked layer · failure mode"]
+        S3["operator steer<br/>hint · disabled families"]
+    end
+
+    R{"route()<br/>class split → defense conditions →<br/>failure-mode rotation → PPL constraint"}
+
+    subgraph LEAVES["21 leaves — one per problem pattern"]
+        LA["A · agent abuse (12)<br/>hijack · exfil · workflow · skill poisoning<br/>subagent spread · overeager · IDOR"]
+        LB["B · content jailbreak (4)<br/>sysprompt leak · forbidden codegen"]
+        LX["X · defense-conditioned (5)<br/>live only when the state shows L1/L2/L1out<br/>or a COMPETING block"]
+    end
+
+    subgraph KB["knowledge base"]
+        K1["technique library T-A…T-F<br/>bypasses B-I*/B-O* · overlay combos"]
+        K2["armory/ — seeds · priors ·<br/>effective chains · run logs"]
+    end
+
+    subgraph EMIT["emit() — mechanical composition, zero LLM"]
+        E1["technique × bypass × overlay<br/>× nesting + canary stamp"]
+        E2["hash dedup · depth cycling ·<br/>crossover → endless fresh cases"]
+    end
+
+    GL["gate LLM<br/>on-topic prune"]
+    T["target LLM agent<br/>browser / API adapter"]
+    J["judge — machine tiers first<br/>(patterns · canary · hijack),<br/>judge LLM only as tier 3"]
+    RW["rewriter — generator LLM<br/>mutates survivors by blocked layer"]
+    FB["TreeWalker.record()"]
+
+    STATE --> R
+    R --> LA & LB & LX
+    K1 --> E1
+    LA & LB & LX --> E1
+    E1 --> E2 --> GL --> T --> J
+    J -->|"S/A/B/C"| FB
+    FB -->|"solved · prune at 3 fails · Wei rotate"| S2
+    FB --> K2
+    E2 -.->|"survivors"| RW
+    RW -.->|"next-round variants"| E2
+```
+
+Three pillars, deliberately kept apart:
+
+- **The tree is the process.** `route()` reads live observations — recon
+  layers, verdict feedback, operator steer — so the plan re-shapes itself every
+  round; nothing replays a fixed list.
+- **The knowledge base is the material.** Leaves compose cases out of the
+  tracked technique/bypass/overlay library; the armory persists every B+ chain
+  and feeds seeds/priors on the bandit path.
+- **LLMs sit at the edges, never the core.** Gate LLM prunes off-topic cases
+  before they cost budget, the generator LLM mutates survivors, the judge LLM
+  is only tier 3 — an S-level win never needs an LLM's opinion.
+
 ## Quick start
 
 ```bash
