@@ -14,7 +14,19 @@ PYTHONPATH=src python3 -m unittest discover -s tests            # 全部单元�
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # 严格模式
 ```
 
-当前基线：**321 tests / ruff clean**。任何 PR 若使上述变红即不合格。
+当前基线：**334 tests / ruff clean**。任何 PR 若使上述变红即不合格。
+
+**本节不是自觉，是机械强制**：`hooks/pre-commit` 在每次提交前自动执行——
+IP/凭据泄漏扫描（§3 #11）→ `ruff check`（ruff 缺失即拒绝提交）→ 当 `src/` 或
+`tests/` 有变更时运行全量套件（§3 红线的守护测试全在其中）。克隆后启用一次：
+
+```bash
+git config core.hooksPath hooks
+```
+
+本文档自身也由 `tests/test_contributing_gate.py` 守护：§3 引用的守卫测试必须
+真实存在、AGENTS.md 信号清单必须与契约类同步、§0 基线计数必须与套件一致——
+文档说谎即红。
 
 ---
 
@@ -46,7 +58,7 @@ src/jb_ape/
 armory/            种子库/先验/有效链/侦察探针/交战快照   （gitignored，本地）
 devdocs/           17 篇知识库（人类参考，可能与代码漂移）  （gitignored，本地）
 skills/jb-ape/     宿主 Agent 技能文档
-tests/             321 项；含 14 条信号契约与各守卫
+tests/             334 项；含 15 条信号契约、各红线守卫与 contributing gate
 ```
 
 **运行时依赖仅可选**（openai/fastmcp/yaml 均懒加载）；核心引擎纯 stdlib 可离线全测。
@@ -128,9 +140,10 @@ Scenario(
 同步更新契约（16/17 篇是设计源，代码是真相，二者冲突以代码+测试为准）。
 
 ## 4. 提交前自查清单
-- [ ] `ruff check` + 全量 unittest（严格模式）绿
+- [x] `ruff check` + 全量 unittest 绿 + IP 泄漏扫描 —— **pre-commit 钩子已自动执行**（未启用则先 `git config core.hooksPath hooks`）
 - [ ] 新用例走的是四条正规路径之一（不是旁路脚本）
-- [ ] 新信号有三问答案 + 契约测试进 `test_signal_contracts.py` 或同级
+- [ ] 新信号有三问答案 + 契约测试进 `test_signal_contracts.py` 或同级（并同步 AGENTS.md 信号表——`test_contributing_gate.G2` 会核对）
 - [ ] YAML 单键 / 占位符封闭 / pattern 可编译 已核对
 - [ ] 未触碰 §3 红线；如确需演进红线：先改 devdocs 对应篇 + 本文档
+- [ ] 未用 `--no-verify` 绕过门禁（仅限紧急情况，且事后必须补跑全量门）
 - [ ] `git status` 干净；无 devdocs/armory/papers/legacy 泄入提交

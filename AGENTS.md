@@ -111,6 +111,7 @@ The current signal inventory (keep in sync when adding one):
 | 12 | armory chains | armory → round-0 seeds |
 | 13 | success_patterns | objective → machine-check S-level |
 | 14 | confirm_on_success | config → confirm call only, never the verdict |
+| 15 | tree verdicts | judge → TreeWalker.record (solved/prune/Wei route) |
 
 ## What an agent should and should NOT do
 
@@ -122,13 +123,16 @@ The current signal inventory (keep in sync when adding one):
 - Promote a winning payload: append its `mutation_chain` to
   `armory/findings/effective_chains.yml` so future runs reuse it.
 - Use `render_report()` to decide whether to submit (gate: `level in {S,A}` and
-  `false_positive_risk < 0.10`).
+  `false_positive_risk < submit_max_false_positive_risk`, default 0.10).
 
 **Do NOT:**
 - Read `devdocs/` (75K words of design notes; redundant with the code, and
   may be stale). If you need *why* something works, read the module docstring.
 - Edit `src/jb_ape/` prompts without running `ruff check src/ tests/` and
-  `python -m unittest discover -s tests` (233 tests guard the invariants).
+  `python -m unittest discover -s tests` (334 tests guard the invariants).
+- Commit with `--no-verify` — the pre-commit gate (IP scan · ruff · suite) is
+  the enforcement of README_BEFORE_CONTRIBUTING §0; bypass only in emergencies
+  and re-run the full gates afterwards.
 - Push `devdocs/` or `armory/` to git — both are gitignored (competition IP).
 
 ## How to wire a real browser
@@ -170,9 +174,16 @@ Key invariants the tests enforce (don't break these):
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 233 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 334 tests
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # strict
 ```
+
+**These gates are mechanically enforced, not voluntary**: the pre-commit hook
+(`hooks/pre-commit`) runs an IP-leak scan → `ruff check` → the full suite
+(when `src/` or `tests/` changed) on every commit. Enable once after clone:
+`git config core.hooksPath hooks`. `tests/test_contributing_gate.py` additionally
+keeps README_BEFORE_CONTRIBUTING.md truthful (guard-test references, signal
+inventory, baseline count).
 
 ## Quick orientation (if you must read code)
 

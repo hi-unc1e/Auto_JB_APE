@@ -1,0 +1,40 @@
+#!/bin/sh
+# jb_ape pre-commit gate — README_BEFORE_CONTRIBUTING §0/§4, enforced mechanically.
+#
+#   1. IP/credential leak scan   (guide red-line #11: devdocs/ armory/ .env … must
+#                                 never enter a commit — .gitignore is the first
+#                                 line of defense; this is the second, against `git add -f`)
+#   2. ruff check src/ tests/    (fail-closed: no ruff installed → no commit)
+#   3. full unittest suite       (only when src/ or tests/ are staged; the suite
+#                                 is what guards the §3 red-line invariants)
+#
+# Enable after clone:  git config core.hooksPath hooks
+# Bypassing with --no-verify is for emergencies only (AGENTS.md forbids it
+# for routine commits).
+set -u
+ROOT="$(git rev-parse --show-toplevel)" || exit 1
+cd "$ROOT" || exit 1
+
+fail() { echo "✗ [pre-commit] $1" >&2; exit 1; }
+
+staged="$(git diff --cached --name-only)"
+
+# 1) IP / secrets must never be staged
+if echo "$staged" | grep -Eq '(^|/)(devdocs|armory|rsrc/papers|\.claude|\.idea|\.playwright-mcp)/|(^|/)\.env|\.log$|^exploit\.html$|^exfil2\.html$|^\.DS_Store$'; then
+    echo "$staged" | grep -E '(^|/)(devdocs|armory|rsrc/papers|\.claude|\.idea|\.playwright-mcp)/|(^|/)\.env|\.log$|^exploit\.html$|^exfil2\.html$|^\.DS_Store$'
+    fail "staged files above are competition IP / credentials (guide §3 #11) — unstage them"
+fi
+
+# 2) ruff gate (fail closed when ruff is absent)
+command -v ruff >/dev/null 2>&1 \
+    || fail "ruff not installed — pip install ruff (the gate is fail-closed)"
+ruff check src/ tests/ >/dev/null \
+    || fail "ruff check failed — run: ruff check src/ tests/"
+
+# 3) engine/test changes must keep the whole suite green
+if echo "$staged" | grep -Eq '^(src|tests)/'; then
+    PYTHONPATH=src python3 -m unittest discover -s tests -q >/dev/null 2>&1 \
+        || fail "unittest suite failed — a §3 red-line invariant may be broken; run the suite for details"
+fi
+
+echo "✓ [pre-commit] gates passed (ip-scan · ruff · suite)"
