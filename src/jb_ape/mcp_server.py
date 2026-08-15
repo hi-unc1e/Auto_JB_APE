@@ -36,11 +36,13 @@ def mcp_start_engagement(url: str, scenario: str | None = None,
                           adapter: str = "dryrun", llm_model: str | None = None,
                           llm_base_url: str | None = None,
                           budget: int = 20, max_rounds: int = 20,
-                          planner_kind: str = "tree") -> dict:
+                          planner_kind: str = "tree",
+                          run_recon: bool = True, recon_budget: int = 6) -> dict:
     spec = EngagementSpec(
         url=url, scenario=scenario, track=track, goal=goal, adapter=adapter,
         llm_model=llm_model, llm_base_url=llm_base_url, budget=budget,
         max_rounds=max_rounds, planner_kind=planner_kind,
+        run_recon=run_recon, recon_budget=recon_budget,
         armory_root="armory",
     )
     eng = create_engagement(spec)
@@ -94,14 +96,17 @@ def build_server():  # pragma: no cover — requires fastmcp at runtime
                          llm_model: str | None = None,
                          llm_base_url: str | None = None,
                          budget: int = 20, max_rounds: int = 20,
-                         planner_kind: str = "tree") -> str:
+                         planner_kind: str = "tree",
+                         run_recon: bool = True, recon_budget: int = 6) -> str:
         """Start a stateful red-team engagement; returns the verdict status
-        incl. engagement id. Authorized targets only."""
+        incl. engagement id. Authorized targets only. run_recon=False skips
+        the defense-probing phase (attacks blind, saves budget)."""
         import json
 
         return json.dumps(mcp_start_engagement(
             url, scenario, track, goal, adapter, llm_model, llm_base_url,
-            budget, max_rounds, planner_kind), ensure_ascii=False)
+            budget, max_rounds, planner_kind, run_recon, recon_budget),
+            ensure_ascii=False)
 
     @mcp.tool()
     def step_engagement(eid: str, rounds: int = 1) -> str:
@@ -119,12 +124,15 @@ def build_server():  # pragma: no cover — requires fastmcp at runtime
         return json.dumps(mcp_status_engagement(eid), ensure_ascii=False)
 
     @mcp.tool()
-    def steer_engagement(eid: str, hint: str) -> str:
+    def steer_engagement(eid: str, hint: str,
+                         disable: list[str] | None = None) -> str:
         """Inject operator guidance; rides as [operator context] on subsequent
-        test cases."""
+        test cases. Optionally disable technique ids (e.g. T-F1) — removed
+        from routing until the engagement restarts."""
         import json
 
-        return json.dumps(mcp_steer_engagement(eid, hint), ensure_ascii=False)
+        return json.dumps(mcp_steer_engagement(eid, hint, disable=disable),
+                          ensure_ascii=False)
 
     @mcp.tool()
     def report_engagement(eid: str) -> str:

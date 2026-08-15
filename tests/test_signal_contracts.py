@@ -32,6 +32,7 @@ Signal inventory covered (producer → consumer):
   12. armory effective chains       → round-0 seed selection
   13. objective success_patterns    → machine-check S-level
   14. config confirm_on_success     → suppresses confirm call, NOT the verdict
+  15. judge verdicts                → TreeWalker.record (solved/prune/Wei route)
 """
 
 from __future__ import annotations
@@ -289,8 +290,7 @@ class C12ArmoryChainsToRoundZeroSeeds(unittest.TestCase):
         seeds = planner.plan_round(0, max_rounds=10, bundle_size=3)
         chain_heads = {c.sequence[0] for c in chains}
         got = {s.mutation_chain[0] for s in seeds}
-        self.assertTrue(got & chain_heads | {s.mutation_chain[0] for s in seeds},
-                        "round-0 seeds carried no armory provenance")
+        self.assertTrue(got & chain_heads, "round-0 seeds carried no armory provenance")
 
 
 class C13SuccessPatternsToSLevel(unittest.TestCase):
@@ -318,10 +318,43 @@ class C14ConfirmFlagToVerdictOnly(unittest.TestCase):
                               confirm_on_success=False, max_rounds=2, bundle_size=1)
         rep_off = br_off.run("https://x/", budget=8)
 
-        self.assertTrue(rep_on.achieved) and self.assertEqual(rep_on.confirmed, 1)
+        self.assertTrue(rep_on.achieved)
+        self.assertEqual(rep_on.confirmed, 1)
         # Verdict identical; only the confirm call differs (codex P1 contract).
         self.assertTrue(rep_off.achieved)
         self.assertEqual(rep_off.confirmed, 0)
+
+
+class C15TreeVerdictsToWalkerFeedback(unittest.TestCase):
+    """judge verdicts → TreeWalker.record (solved / prune / Wei rotation).
+
+    Before the wiring, the tree emitted cases but never adapted inside the
+    production loop: stats.fails stayed 0 and route() never saw a blocked
+    mode — the exact "produced-but-never-consumed" disease this suite exists
+    to catch (the tree's feedback was unit-tested in isolation only)."""
+
+    def test_contract(self):
+        obj = Objective(track=Track.CODING, goal="x",
+                        success_patterns=[r"HTB\{.*?\}"])
+        subs = [SubmissionResult(dom_text="plain unhelpful text")] * 16
+        gen = build_engine(obj, browser=DryRunBrowserClient(responses=subs),
+                           armory_root=None, planner_kind="tree",
+                           config=RunConfig(run_recon=False, bundle_size=3,
+                                            max_rounds=4))
+        rep = gen.run("https://x/", budget=12)
+        self.assertFalse(rep.achieved)
+        total_fails = sum(st.fails for st in gen.planner.stats.values())
+        self.assertGreater(total_fails, 0)  # record() actually called
+        self.assertIsNotNone(gen.planner.state.last_blocked_mode)  # route rotated
+
+    def test_generator_blocked_mode_lands_on_walker_state(self):
+        from jb_ape.dtree import TreeWalker
+        from jb_ape.jailbreak import FailureMode
+
+        w = TreeWalker(objective=Objective(track=Track.CODING, goal="g"))
+        self.assertIsNone(w.state.last_blocked_mode)
+        w.last_blocked_mode = FailureMode.COMPETING  # what step_round writes
+        self.assertIs(w.state.last_blocked_mode, FailureMode.COMPETING)
 
 
 if __name__ == "__main__":

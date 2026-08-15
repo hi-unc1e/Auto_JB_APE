@@ -61,15 +61,15 @@ class TestSubmissionResult(unittest.TestCase):
 class TestJudgeResult(unittest.TestCase):
     def test_can_submit_gate(self):
         ok = JudgeResult(level="S", achieved=True, quality_score=100, false_positive_risk=0.02)
-        self.assertTrue(ok.can_submit)
+        self.assertTrue(ok.can_submit(0.10))
 
     def test_can_submit_blocked_by_high_fpr(self):
         risky = JudgeResult(level="A", achieved=True, quality_score=90, false_positive_risk=0.5)
-        self.assertFalse(risky.can_submit)
+        self.assertFalse(risky.can_submit(0.10))
 
     def test_can_submit_blocked_by_not_achieved(self):
         no = JudgeResult(level="B", achieved=False, quality_score=60, false_positive_risk=0.02)
-        self.assertFalse(no.can_submit)
+        self.assertFalse(no.can_submit(0.10))
 
 
 class TestVariant(unittest.TestCase):

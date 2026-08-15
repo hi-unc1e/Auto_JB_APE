@@ -223,11 +223,15 @@ class Generator:
                 self.objective.track, rec.arm_id, rec.achieved, rec.score
             )
 
-            gate_passed = (
-                result.achieved
-                and result.false_positive_risk
-                < self.objective.submit_max_false_positive_risk
-            )
+            # Tree-planner feedback (dtree.TreeWalker.record): solved / prune /
+            # Wei-mode rotation must react to verdicts in production, not just
+            # in unit tests. Duck-typed — the flat Planner has no record().
+            planner_record = getattr(self.planner, "record", None)
+            if callable(planner_record):
+                planner_record(var, result.achieved, result.quality_score)
+
+            gate_passed = result.can_submit(
+                self.objective.submit_max_false_positive_risk)
             if gate_passed:
                 if self.config.confirm_on_success:
                     self.browser.confirm_submit()

@@ -187,6 +187,7 @@ def cmd_engage(args) -> int:
             goal=args.goal, adapter=args.adapter, llm_model=args.llm_model,
             llm_base_url=args.llm_base_url, budget=args.budget,
             max_rounds=args.rounds, planner_kind=args.planner,
+            run_recon=not args.no_recon,
             armory_root="armory",
         )
         from jb_ape.engagement import create_engagement
@@ -199,7 +200,8 @@ def cmd_engage(args) -> int:
     elif args.engage_cmd == "status":
         print(json.dumps(eng.status(), ensure_ascii=False, indent=1))
     elif args.engage_cmd == "steer":
-        print(json.dumps(eng.steer(args.hint), ensure_ascii=False, indent=1))
+        print(json.dumps(eng.steer(args.hint, disable=args.disable),
+                         ensure_ascii=False, indent=1))
     elif args.engage_cmd == "report":
         print(eng.report_md())
     return 0
@@ -253,6 +255,8 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--budget", type=int, default=20)
     st.add_argument("--rounds", type=int, default=20)
     st.add_argument("--planner", default="tree", choices=["bandit", "tree"])
+    st.add_argument("--no-recon", action="store_true",
+                    help="skip the recon phase (attack blind)")
     stp = pes.add_parser("step")
     stp.add_argument("--id", required=True)
     stp.add_argument("--rounds", type=int, default=1)
@@ -261,6 +265,8 @@ def build_parser() -> argparse.ArgumentParser:
     stg = pes.add_parser("steer")
     stg.add_argument("--id", required=True)
     stg.add_argument("--hint", required=True)
+    stg.add_argument("--disable", action="append",
+                    help="technique id removed from routing (repeatable)")
     strp = pes.add_parser("report")
     strp.add_argument("--id", required=True)
 

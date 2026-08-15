@@ -301,6 +301,18 @@ class TreeWalker:
         self._depth = 0
         self.solved_paths: list[str] = []
 
+    # The generator writes the round's majority blocked mode to
+    # ``planner.last_blocked_mode`` (planner.Planner has it as a real field);
+    # route() reads it off TargetState. Proxy both ways so the one signal
+    # can't land on an attribute nobody reads.
+    @property
+    def last_blocked_mode(self) -> FailureMode | None:
+        return self.state.last_blocked_mode
+
+    @last_blocked_mode.setter
+    def last_blocked_mode(self, mode: FailureMode | None) -> None:
+        self.state.last_blocked_mode = mode
+
     # -- scoring --------------------------------------------------------------
     def _score(self, leaf: Leaf) -> float:
         st = self.stats[leaf.lid]

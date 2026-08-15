@@ -53,6 +53,9 @@ class EngagementSpec:
     planner_kind: str = "tree"
     budget: int = 20
     recon_budget: int = 6
+    # 先侦察后攻击 (devdocs/02 §7) — same default as `jb-ape run`/RunConfig,
+    # so all entry points behave alike; False = skip recon and attack blind.
+    run_recon: bool = True
     bundle: int = 3
     max_rounds: int = 20
 
@@ -115,19 +118,23 @@ class Engagement:
         """Inject outer-agent guidance (devdocs/17 §4).
 
         ``hint`` rides as a bracketed ``[operator context]`` line on every
-        subsequently emitted payload (observable, testable). ``disable`` is a
-        structural steering primitive: technique-family ids (e.g. ``T-F1``)
-        whose leaves are removed from routing until re-enabled with
-        ``enable=``-style steer (pass the same id via ``disable=[]`` plus
-        hint marker? no — see mcp layer: disable is sticky; re-enable by
-        restarting the engagement or future enable API)."""
+        subsequently emitted payload — observable and testable on BOTH
+        planners (tree: TargetState.hints; bandit: Planner.hints).
+        ``disable`` structurally removes technique ids (e.g. ``T-F1``) from
+        routing. It is sticky: re-enable by restarting the engagement (a
+        future enable API may lift it)."""
         self.steer_hints.append(hint)
         planner = self.generator.planner
         state = getattr(planner, "state", None)
-        if state is not None:
+        if state is not None:  # tree planner
             state.hints = list(self.steer_hints)
             if disable:
                 state.disabled_families = set(state.disabled_families) | set(disable)
+        if hasattr(planner, "hints"):  # flat planner consumes the same signals
+            planner.hints = list(self.steer_hints)
+        if disable and hasattr(planner, "disabled_families"):
+            planner.disabled_families = (
+                set(getattr(planner, "disabled_families", set())) | set(disable))
         self.save()
         return self.status()
 
@@ -170,6 +177,14 @@ class Engagement:
             },
             "markers": self.markers,
             "steer_hints": self.steer_hints,
+            # Flat-planner steering (the tree planner persists the same two
+            # signals via walker.state): must survive restarts on both planners.
+            "planner": {
+                "hints": list(getattr(self.generator.planner, "hints", []) or []),
+                "disabled_families": sorted(
+                    getattr(self.generator.planner, "disabled_families", set())
+                    or set()),
+            },
             # Target-side multi-turn history (LLMTargetClient) — restores
             # Crescendo/CFD continuity across process restarts (devdocs/17 §7).
             "target": {
@@ -195,7 +210,7 @@ class Engagement:
             "walker": {
                 k: v for k, v in walker.items()
                 if k in ("_emitted_hashes", "_depth", "solved_paths",
-                         "_xover_cursor", "state")
+                         "_xover_cursor", "state", "stats")
             },
             "bandit": {
                 f"{getattr(tr, 'value', tr)}|{arm}": [a.alpha, a.beta]
@@ -216,6 +231,14 @@ class Engagement:
             snap["walker"]["state"] = sd
         if isinstance(snap["walker"].get("_emitted_hashes"), set):
             snap["walker"]["_emitted_hashes"] = sorted(snap["walker"]["_emitted_hashes"])
+        # TreeWalker._LeafStat dataclasses → plain dicts (JSON-safe), so
+        # prune/solve/fail state survives restarts with the rest of the walker.
+        stats = snap["walker"].get("stats")
+        if isinstance(stats, dict):
+            snap["walker"]["stats"] = {
+                lid: (vars(st) if hasattr(st, "__dict__") else st)
+                for lid, st in stats.items()
+            }
         return snap
 
     def save(self, store: Path | str | None = None) -> Path:
@@ -298,10 +321,24 @@ class Engagement:
                 if sd.get("last_blocked_mode"):
                     sd["last_blocked_mode"] = FailureMode(sd["last_blocked_mode"])
                 gen.planner.state = TargetState(**sd)
+            stats_snap = snap["walker"].get("stats")
+            if stats_snap and hasattr(gen.planner, "stats"):
+                from jb_ape.dtree import _LeafStat
+
+                fields = _LeafStat.__dataclass_fields__
+                gen.planner.stats = {
+                    lid: _LeafStat(**{k: v for k, v in d.items() if k in fields})
+                    for lid, d in stats_snap.items()
+                }
         for key, (alpha, beta) in snap.get("bandit", {}).items():
             tr_s, arm = key.split("|", 1)
             arm_obj = gen.bandit.arm(Track(tr_s), arm)
             arm_obj.alpha, arm_obj.beta = alpha, beta
+        # restore flat-planner steering (tree planner restores via walker.state)
+        psnap = snap.get("planner") or {}
+        if hasattr(gen.planner, "hints"):
+            gen.planner.hints = list(psnap.get("hints") or [])
+            gen.planner.disabled_families = set(psnap.get("disabled_families") or [])
         return eng
 
 
@@ -339,7 +376,7 @@ def create_engagement(spec: EngagementSpec) -> Engagement:
         objective, browser=browser, armory_root=spec.armory_root,
         hijack_success_markers=markers or None,
         planner_kind=spec.planner_kind,
-        config=RunConfig(run_recon=False, bundle_size=spec.bundle,
+        config=RunConfig(run_recon=spec.run_recon, bundle_size=spec.bundle,
                          max_rounds=spec.max_rounds),
     )
     return register(Engagement(spec, browser, gen, objective, markers))

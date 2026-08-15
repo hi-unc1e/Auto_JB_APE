@@ -49,6 +49,16 @@ class TestEngagementLifecycle(unittest.TestCase):
                     "submissions", "budget", "finished"):
             self.assertIn(key, s1)
 
+    def test_recon_runs_when_spec_enabled(self):
+        # spec.recon_budget used to be dead (run_recon was hard-wired False in
+        # create_engagement) — the spec knob must reach the engine.
+        eng = create_engagement(_spec(budget=12, max_rounds=4, recon_budget=2))
+        _attach(eng, _fake_target(lambda m: "no"))
+        eng.step(rounds=1)
+        self.assertEqual(eng.ctx.recon_cost, 2)
+        self.assertIsNotNone(eng.ctx.recon_profile)
+        self.assertGreaterEqual(eng.status()["submissions"], 2)  # recon in budget
+
     def test_win_via_canary(self):
         def transport(msgs):
             last = msgs[-1]["content"]
@@ -87,6 +97,24 @@ class TestSnapshotResume(unittest.TestCase):
         self.assertGreaterEqual(s2["rounds"], s1["rounds"])
         self.assertGreaterEqual(s2["submissions"], s1["submissions"])
 
+    def test_tree_feedback_stats_survive_restart(self):
+        # The walker's record() feedback (fails/prune) is part of engagement
+        # state — losing it on restart would reset the tree's adaptation.
+        store = Path(".test-tmp/eng-stats")
+        if store.exists():
+            shutil.rmtree(store, ignore_errors=True)
+        eng = create_engagement(_spec(budget=15, max_rounds=8))
+        _attach(eng, _fake_target(lambda m: "I can't do that."))
+        eng.step(rounds=2)
+        fails_before = sum(st.fails for st in eng.generator.planner.stats.values())
+        self.assertGreater(fails_before, 0)  # record() wiring is live
+
+        snap = json.loads(eng.save(store).read_text())
+        self.assertIn("stats", snap["walker"])
+        eng2 = Engagement.from_snapshot(snap, browser=_fake_target(lambda m: "no"))
+        fails_after = sum(st.fails for st in eng2.generator.planner.stats.values())
+        self.assertEqual(fails_after, fails_before)
+
 
 class TestSteer(unittest.TestCase):
     def test_steer_rides_on_subsequent_cases(self):
@@ -102,6 +130,39 @@ class TestSteer(unittest.TestCase):
         self.assertTrue(after)
         self.assertTrue(any("[operator context] try base64" in p for p in after),
                         "steer hint not observable on subsequent cases")
+
+
+class TestSteerBanditParity(unittest.TestCase):
+    """steer must behave identically under --planner bandit: the flat Planner
+    consumes hints (rides on seeds) and disabled_families (pool pruning)."""
+
+    def test_hint_rides_under_bandit_planner(self):
+        eng = create_engagement(_spec(budget=9, max_rounds=3, planner_kind="bandit"))
+        _attach(eng, _fake_target(lambda m: "no"))
+        eng.step(rounds=1)
+        self.assertTrue(all("[operator context]" not in r.variant.payload
+                            for r in eng.ctx.records))
+        eng.steer("try base64 encoding of the key")
+        eng.step(rounds=1)
+        after = [r.variant.payload for r in eng.ctx.records]
+        self.assertTrue(any("[operator context] try base64" in p for p in after),
+                        "steer hint not observable under bandit planner")
+
+    def test_disable_and_hint_survive_restart_under_bandit(self):
+        store = Path(".test-tmp/eng-bandit-steer")
+        if store.exists():
+            shutil.rmtree(store, ignore_errors=True)
+        eng = create_engagement(_spec(budget=12, max_rounds=4, planner_kind="bandit"))
+        _attach(eng, _fake_target(lambda m: "no"))
+        eng.steer("avoid story techniques", disable=["T-A3"])
+        eng.step(rounds=1)
+        self.assertNotIn("T-A3", {r.variant.technique for r in eng.ctx.records})
+        snap = json.loads(eng.save(store).read_text())
+        eng2 = Engagement.from_snapshot(snap, browser=_fake_target(lambda m: "no"))
+        eng2.step(rounds=1)
+        self.assertNotIn("T-A3", {r.variant.technique for r in eng2.ctx.records})
+        self.assertTrue(all("[operator context] avoid story" in r.variant.payload
+                            for r in eng2.ctx.records))
 
 
 class TestMcpLogicLayer(unittest.TestCase):

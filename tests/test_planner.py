@@ -118,5 +118,40 @@ class TestDedupe(unittest.TestCase):
         self.assertEqual(len(out), 2)
 
 
+class TestSteering(unittest.TestCase):
+    """Operator steering on the flat planner (devdocs/17 §4 parity with the
+    tree planner's TargetState.hints / disabled_families)."""
+
+    def _planner(self):
+        return Planner(objective=Objective(track=Track.CODING, goal="g"),
+                       bandit=Bandit(rng=random.Random(0)))
+
+    def test_hint_rides_on_planned_seeds(self):
+        p = self._planner()
+        plain = p.plan_round(0, max_rounds=10, bundle_size=2)
+        self.assertTrue(all("[operator context]" not in s.payload for s in plain))
+        p.hints = ["prefer base64 output"]
+        stamped = p.plan_round(1, max_rounds=10, bundle_size=2)
+        self.assertTrue(stamped)
+        for s in stamped:
+            self.assertIn("\n[operator context] prefer base64 output", s.payload)
+            self.assertEqual(s.mutation_chain[-1], "STEER")
+
+    def test_disabled_families_leave_the_pool(self):
+        p = self._planner()
+        pool = {t.tid for t in p._candidate_techniques()}
+        victim = sorted(pool)[0]
+        p.disabled_families = {victim}
+        for r in range(20):
+            for s in p.plan_round(r, 20, 1):
+                self.assertNotEqual(s.technique, victim)
+
+    def test_disabling_everything_falls_back_to_full_pool(self):
+        p = self._planner()
+        pool = {t.tid for t in p._candidate_techniques()}
+        p.disabled_families = set(pool)
+        self.assertEqual({t.tid for t in p._candidate_techniques()}, pool)
+
+
 if __name__ == "__main__":
     unittest.main()

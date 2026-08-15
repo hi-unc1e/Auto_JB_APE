@@ -161,10 +161,13 @@ class JudgeResult:
     improve_hint: str = ""
     false_positive_risk: float = 1.0
 
-    @property
-    def can_submit(self) -> bool:
-        """Submission gate (devdocs/01 §3): achieved AND low FPR risk."""
-        return self.achieved and self.false_positive_risk < 0.10
+    def can_submit(self, max_fpr: float) -> bool:
+        """Submission gate (devdocs/01 §3): achieved AND FPR below the
+        caller's threshold. Pass the objective's
+        ``submit_max_false_positive_risk`` — the same field the generator's
+        real gate reads — so this convenience can never silently diverge from
+        it (no hidden 0.10 default)."""
+        return self.achieved and self.false_positive_risk < max_fpr
 
 
 @dataclass

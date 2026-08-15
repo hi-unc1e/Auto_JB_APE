@@ -103,10 +103,22 @@ class Planner:
     # Wei failure-mode feedback (devdocs/14 §1): set by the generator after a
     # round was blocked — plan_round then prefers the OPPOSITE mode's techniques.
     last_blocked_mode: object | None = None  # jailbreak.FailureMode | None
+    # Operator steering (devdocs/17 §4) — the same two signals TargetState
+    # carries for the tree planner, so Engagement.steer works on BOTH:
+    # hints ride as a bracketed [operator context] line on every seed;
+    # disabled families are removed from the candidate pool.
+    hints: list[str] = field(default_factory=list)
+    disabled_families: set[str] = field(default_factory=set)
 
     def _candidate_techniques(self) -> list[Technique]:
         techs = technique_for_track(self.objective.track)
-        return techs or list(TECHNIQUES.values())
+        techs = techs or list(TECHNIQUES.values())
+        if self.disabled_families:
+            kept = [t for t in techs if t.tid not in self.disabled_families]
+            # Disabling the entire pool is an operator error — fall back to
+            # the full pool rather than starving plan_round.
+            techs = kept or techs
+        return techs
 
     def _eps(self, round_idx: int, max_rounds: int) -> float:
         if max_rounds <= 1:
@@ -171,7 +183,10 @@ class Planner:
         if round_idx == 0 and self.profile is not None and self.profile.detected_layers:
             seeds = [self._apply_recon_bypasses(s) for s in seeds]
 
-        return seeds[: max(bundle_size, len(seeds))]
+        out = seeds[: max(bundle_size, len(seeds))]
+        if self.hints:
+            out = [_stamp_hint(s, self.hints[-1]) for s in out]
+        return out
 
     def _apply_recon_bypasses(self, variant: Variant) -> Variant:
         """Fold recon-detected layers into a seed variant — and ACTUALLY
@@ -233,23 +248,44 @@ class Planner:
         return out
 
     def _seeds_from_chains(self, bundle_size: int) -> list[Variant]:
-        """Materialize the top effective chain for this track into a single
-        seed payload (the first element of the chain). Deeper chain elements
-        are applied by the rewriter in subsequent rounds."""
-        out: list[Variant] = []
+        """Materialize the top effective chain for this track into a round-0
+        seed (the chain's first element). Deeper chain elements are applied
+        by the rewriter in subsequent rounds.
+
+        Chains are usually technique-headed (e.g. ``["T-D3", "T-A1"]``) and
+        only sometimes seed-headed (``["EMI-01", ...]``): when the head is a
+        known technique, render it as the seed — otherwise the chain signal
+        never reaches round 0 on technique-headed chains at all."""
         if self.armory is None:
-            return out
+            return []
         chains = self.armory.load_chains(self.objective.track)
         if not chains:
-            return out
+            return []
         top = max(chains, key=lambda c: c.asr_prior)
-        # Use the first chain element if it matches a known seed, else a token.
         first = top.sequence[0] if top.sequence else ""
         for seed in self.armory.load_seeds(self.objective.track):
             if seed.sid == first:
-                out.append(seed.to_variant(self.objective.goal, depth=0))
-                break
-        return out[:bundle_size]
+                return [seed.to_variant(self.objective.goal, depth=0)][:bundle_size]
+        tech = TECHNIQUES.get(first)
+        if tech is not None:
+            return [Variant(
+                payload=render(tech, self.objective.goal), technique=tech.tid,
+                scenario="", bypasses=[], mutation_chain=[first], depth=0,
+            )][:bundle_size]
+        return []
+
+
+def _stamp_hint(variant: Variant, hint: str) -> Variant:
+    """Attach the operator's steering hint as a bracketed context line —
+    byte-identical format to the tree planner's emission (dtree.Leaf.emit),
+    so downstream consumers treat both planners the same."""
+    return Variant(
+        payload=variant.payload + "\n[operator context] " + hint,
+        technique=variant.technique, scenario=variant.scenario,
+        bypasses=list(variant.bypasses),
+        mutation_chain=variant.mutation_chain + ["STEER"],
+        depth=variant.depth,
+    )
 
 
 @dataclass
