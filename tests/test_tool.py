@@ -25,6 +25,17 @@ from jb_ape.models import Track
 from jb_ape.targets import AgentBrowserClient, LLMTargetClient
 
 
+class TestPublicApiSurface(unittest.TestCase):
+    """AGENTS.md's "4-line usage contract" promises top-level imports —
+    the package must actually export them (quick_run was once missing)."""
+
+    def test_documented_imports_resolve(self):
+        from jb_ape import Objective, Track, build_engine, quick_run  # noqa: F401
+
+        self.assertTrue(callable(quick_run))
+        self.assertTrue(callable(build_engine))
+
+
 class TestCatalogIntegrity(unittest.TestCase):
     def test_covers_all_problem_categories(self):
         got = {s.problem for s in SCENARIOS.values()}

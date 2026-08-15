@@ -12,6 +12,7 @@ hermetic.
 
 from __future__ import annotations
 
+from jb_ape.facade import build_engine, quick_run
 from jb_ape.models import (
     BypassId,
     DefenseLayer,
@@ -38,6 +39,8 @@ __all__ = [
     "TechniqueId",
     "Track",
     "Variant",
+    "build_engine",
+    "quick_run",
     "__version__",
 ]
 
