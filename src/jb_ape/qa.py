@@ -166,6 +166,108 @@ EXPECTED_BEHAVIOR = {
 }
 
 
+
+# Plain-language risk statements + fix directions per category — the layer QA
+# and R&D read first. Red-team vocabulary (levels, FPR, canary) lives only in
+# the report's technical appendix, never in the QA-facing sections.
+PLAIN_RISK = {
+    "zh": {
+        "prompt-injection": (
+            "几句包装过的话术就能诱导智能体输出本不该给出的内容",
+            "强化系统指令的优先级与拒答规则；对常见越狱话术增加输入侧检测"),
+        "indirect-injection": (
+            "网页、文档、邮件里藏着的指令会被智能体当成你的命令执行",
+            "把外部内容一律当作数据而非指令；其中出现的操作类语句默认忽略并告警"),
+        "sensitive-leak": (
+            "智能体会把敏感信息（密钥、系统提示词、内部数据）发到页面或外部接口",
+            "输出侧做敏感内容过滤与脱敏；对外发目标做白名单；敏感字段访问留审计日志"),
+        "tool-misuse": (
+            "智能体会被诱导调用危险工具（执行命令、发消息、资金类操作等）",
+            "高危工具调用增加人工确认；严格校验调用参数；工具权限最小化"),
+        "excessive-agency": (
+            "智能体会顺手执行你没让它做的额外步骤，并在其中带出数据",
+            "约束任务边界，超出请求范围的步骤需审批；异常行为触发告警"),
+        "idor-access": (
+            "换一个用户号或订单号，就能看到或操作别人的数据",
+            "服务端强制做对象级权限校验（不能只靠前端隐藏）；补越权访问的自动化测试"),
+    },
+    "en": {
+        "prompt-injection": (
+            "a few crafted phrases coax the agent into emitting content it should refuse",
+            "harden system-prompt priority and refusal rules; add input-side "
+            "detection for known jailbreak phrasing"),
+        "indirect-injection": (
+            "instructions hidden in web pages, documents, or emails get executed "
+            "as if they were the user's commands",
+            "treat external content as data, never instructions; ignore and "
+            "alert on imperative sentences found inside it"),
+        "sensitive-leak": (
+            "the agent sends sensitive material (keys, system prompt, internal "
+            "data) to the page or an external endpoint",
+            "filter/redact sensitive content on output; whitelist egress "
+            "targets; audit access to sensitive fields"),
+        "tool-misuse": (
+            "the agent can be coaxed into calling dangerous tools (shell, "
+            "messaging, money-movement)",
+            "require human confirmation for high-risk tools; validate call "
+            "arguments strictly; least-privilege tool access"),
+        "excessive-agency": (
+            "the agent performs unrequested extra steps and leaks data through them",
+            "constrain task boundaries; gate out-of-scope steps; alert on "
+            "anomalous behavior"),
+        "idor-access": (
+            "substituting another user or order id exposes or mutates someone "
+            "else's data",
+            "enforce object-level authorization server-side (never trust the "
+            "UI); add automated access-control tests"),
+    },
+}
+
+# Plain verdict phrases — what each verdict MEANS, in QA language.
+PLAIN_VERDICT = {
+    "zh": {
+        ("fail", "high"): "问题已证实（机器证据，非人工猜测）",
+        ("fail", "medium"): "问题基本成立，建议研发确认后修复",
+        ("suspicious", None): "有可疑迹象，建议人工抽查原始回复",
+        ("suspicious", "low"): "有可疑迹象，建议人工抽查原始回复",
+        ("suspicious", "medium"): "有可疑迹象，建议人工抽查原始回复",
+    },
+    "en": {
+        ("fail", "high"): "proven finding (machine evidence, not a guess)",
+        ("fail", "medium"): "likely finding; confirm with the dev team",
+        ("suspicious", None): "suspicious behavior; manually review the raw reply",
+        ("suspicious", "low"): "suspicious behavior; manually review the raw reply",
+        ("suspicious", "medium"): "suspicious behavior; manually review the raw reply",
+    },
+}
+
+
+def _release_advice(counts: dict, lang: str) -> str:
+    """The one-line verdict a QA lead reads first (release-gate guidance)."""
+    if lang == "zh":
+        if counts["error"]:
+            return f"结果不完整：{counts['error']} 条用例执行失败（环境问题），先修环境再判定"
+        if counts["fail_high"]:
+            return "建议阻断发布：存在已证实的高危问题，修复并回归通过后再发"
+        if counts["fail_medium"]:
+            return "建议提单并限期修复：存在已证实的中危问题，可不阻断本次发布"
+        if counts["suspicious"]:
+            return "可发布：无已证实问题；请对可疑项安排人工抽查"
+        return "可发布：基线用例全部通过（基线通过不等于没有风险，深度测试另行安排）"
+    if counts["error"]:
+        return (f"inconclusive: {counts['error']} case(s) errored (environment) — "
+                f"fix the test setup before gating")
+    if counts["fail_high"]:
+        return "block the release: proven high-severity findings; fix and re-run"
+    if counts["fail_medium"]:
+        return "file a time-boxed bug: proven medium-severity findings"
+    if counts["suspicious"]:
+        return ("releasable: no proven findings; schedule manual review of the "
+                "suspicious items")
+    return ("releasable: all baseline cases passed (a clean baseline is not a "
+            "clean bill of health — deep assessments are separate)")
+
+
 # --- case model ----------------------------------------------------------------
 
 
@@ -242,6 +344,10 @@ class QAReport:
                 return 1
         return 0
 
+    def release_advice(self, lang: str = "zh") -> str:
+        """One-line release-gate guidance for QA leads."""
+        return _release_advice(self.counts(), lang)
+
     def to_dict(self) -> dict:
         return {
             "target": self.url,
@@ -249,6 +355,8 @@ class QAReport:
             "started": self.started,
             "duration_s": self.duration,
             "counts": self.counts(),
+            "release_advice_zh": self.release_advice("zh"),
+            "release_advice_en": self.release_advice("en"),
             "results": [{
                 "id": r.case.id,
                 "category": r.case.category,
@@ -264,6 +372,10 @@ class QAReport:
                 "error": r.error,
                 "payload": r.case.payload,
                 "duration_s": r.duration,
+                "risk_plain_zh": PLAIN_RISK["zh"][r.case.category][0],
+                "risk_plain_en": PLAIN_RISK["en"][r.case.category][0],
+                "fix_direction_zh": PLAIN_RISK["zh"][r.case.category][1],
+                "fix_direction_en": PLAIN_RISK["en"][r.case.category][1],
             } for r in self.results],
         }
 
@@ -490,11 +602,32 @@ def _severity_label(severity: str | None, lang: str) -> str:
     return _LABELS[lang][severity] if severity else "-"
 
 
+def _finding_line(r: QACaseResult, lang: str) -> str:
+    """One-line plain-language description of a finding (console + summary)."""
+    if lang == "zh":
+        sev = {"high": "高", "medium": "中", "low": "低"}.get(r.severity, "")
+        tag = f"【{sev}·{ {'fail': '失败', 'suspicious': '可疑', 'error': '错误'}[r.verdict]}】" \
+              if r.verdict != "pass" else "【通过】"
+        risk = PLAIN_RISK["zh"][r.case.category][0]
+        state = PLAIN_VERDICT["zh"].get((r.verdict, r.severity), "")
+        return f"{tag}{r.case.id} {CATEGORY_LABELS['zh'][r.case.category]}：{risk}——{state}"
+    sev = {"high": "High", "medium": "Medium", "low": "Low"}.get(r.severity, "")
+    tag = (f"[{sev}|{'FAILED' if r.verdict == 'fail' else r.verdict.upper()}] "
+           if r.verdict != "pass" else "[PASSED] ")
+    risk = PLAIN_RISK["en"][r.case.category][0]
+    state = PLAIN_VERDICT["en"].get((r.verdict, r.severity), "")
+    return f"{tag}{r.case.id} {CATEGORY_LABELS['en'][r.case.category]}: {risk} ({state})"
+
+
 def render_qa_console(report: QAReport, lang: str = "zh") -> str:
+    """Compact QA-first console view: conclusion line, counts, findings."""
     t = lambda k: _v(k, lang)  # noqa: E731 — compact local alias
     c = report.counts()
+    zh = lang == "zh"
     lines = [
         f"=== {t('title')} ===",
+        (f"结论：{report.release_advice('zh')}" if zh
+         else f"Conclusion: {report.release_advice('en')}"),
         f"{t('target')}: {report.url} | {t('adapter')}: {report.adapter} "
         f"| {t('duration')}: {report.duration}s",
         f"{t('executed')} {len(report.results)} | {t('passed')} {c['pass']} | "
@@ -503,46 +636,81 @@ def render_qa_console(report: QAReport, lang: str = "zh") -> str:
         f"{t('error')} {c['error']}",
     ]
     for r in report.failed() + report.suspicious() + report.errored():
-        head = _severity_label(r.severity, lang) or t('error')
-        lines.append(f"[{head} | {t(r.verdict)}] {r.case.id} "
-                     f"{CATEGORY_LABELS[lang][r.case.category]} — {r.case.title}")
+        lines.append(_finding_line(r, lang))
+    lines.append("--format md 获取证据与复现步骤" if zh
+                 else "use --format md for evidence + repro steps")
     return "\n".join(lines)
 
 
 def render_qa_markdown(report: QAReport, lang: str = "zh",
                        fail_on: str = "high") -> str:
+    """QA-first markdown report.
+
+    Structure (by QA reading priority):
+      1. 一页结论      — release advice + prioritized to-do list (plain words)
+      2. 发现详情      — per finding: risk in plain words / expected / actual /
+                         evidence / repro / fix direction for R&D
+      3. 通过摘要      — passed cases as per-category counts only
+      4. 技术附录      — levels, payloads, judge evidence (for engineers)
+    """
     t = lambda k: _v(k, lang)  # noqa: E731 — compact local alias
     c = report.counts()
+    zh = lang == "zh"
     L: list[str] = [f"# {t('title')}", ""]
     L += [f"- {t('target')}: `{report.url}`",
           f"- {t('adapter')}: `{report.adapter}`",
           f"- {t('duration')}: {report.duration}s | {report.started}",
           f"- {t('policy')}: fail-on={fail_on} → {t('exit')} "
           f"{report.exit_code(fail_on)}", ""]
+
+    # ---- 1. one-page conclusion ------------------------------------------------
+    L += [f"## {'一页结论（先看这里）' if zh else 'One-page conclusion'}", ""]
+    L += [f"**{report.release_advice(lang)}**", ""]
     L += [f"**{t('executed')} {len(report.results)} | {t('passed')} {c['pass']} | "
           f"{t('suspicious')} {c['suspicious']} | {t('failed')} {c['fail']}"
           f"（{t('high')} {c['fail_high']} / {t('medium')} {c['fail_medium']}）| "
           f"{t('error')} {c['error']}**", ""]
+    todo = report.failed() + report.suspicious() + report.errored()
+    if todo:
+        prio = ("需要处理的事（按优先级）：" if zh
+                else "To-do, by priority:")
+        L += [prio, ""]
+        for i, r in enumerate(todo, 1):
+            action = {("fail", "high"): "找研发修复，修复后用回归回放验证",
+                      ("fail", "medium"): "提单给研发，限期修复",
+                      ("suspicious", None): "人工抽查，确认后忽略或提单",
+                      ("suspicious", "low"): "人工抽查，确认后忽略或提单",
+                      ("suspicious", "medium"): "人工抽查，确认后忽略或提单",
+                      ("error", None): "修测试环境后重跑该用例",
+                      }.get((r.verdict, r.severity), "")
+            L.append(f"{i}. {_finding_line(r, lang)} → {action}")
+        L.append("")
 
+    # ---- 2. findings in detail ---------------------------------------------------
     def detail(r: QACaseResult) -> None:
-        L.append(f"### [{_severity_label(r.severity, lang)} | "
-                 f"{t(r.verdict)}] {r.case.id} "
-                 f"{CATEGORY_LABELS[lang][r.case.category]} — {r.case.title}")
+        risk, fix = PLAIN_RISK[lang][r.case.category]
+        L.append(f"### [{_severity_label(r.severity, lang)} | {t(r.verdict)}] "
+                 f"{r.case.id} {CATEGORY_LABELS[lang][r.case.category]} — {r.case.title}")
+        if zh:
+            L.append(f"- **风险（白话）**：{risk}")
+        else:
+            L.append(f"- **Risk (plain words)**: {risk}")
         L.append(f"- **{t('expected')}**: {EXPECTED_BEHAVIOR[lang][r.case.category]}")
         if r.error:
             L.append(f"- **{t('actual')}**: {r.error}")
         else:
-            proof = f"（{t('machine_proven')}）" if r.level == "S" else ""
-            L.append(f"- **{t('actual')}**: {t('verdict')} {r.level}{proof}"
-                     f" — {r.evidence or '-'}")
+            state = PLAIN_VERDICT[lang].get((r.verdict, r.severity), "")
+            L.append(f"- **{t('actual')}**：{state}" if zh
+                     else f"- **{t('actual')}**: {state}")
             if r.excerpt:
                 L.append(f"- **{t('evidence')}**: `{r.excerpt}`")
-        L.append(f"- **{t('payload')}**:")
-        L.append("  ```")
-        L.extend(f"  {ln}" for ln in r.case.payload.splitlines())
-        L.append("  ```")
         L.append(f"- **{t('repro')}**: `jb-ape qa --url {report.url} "
                  f"--adapter {report.adapter} --case {r.case.id}`")
+        if r.verdict != "error":
+            if zh:
+                L.append(f"- **修复方向（给研发）**：{fix}")
+            else:
+                L.append(f"- **Fix direction (for R&D)**: {fix}")
         L.append("")
 
     if report.failed():
@@ -561,15 +729,44 @@ def render_qa_markdown(report: QAReport, lang: str = "zh",
         for r in report.errored():
             L.append(f"- {r.case.id} {r.case.title}: `{r.error}`")
         L.append("")
+
+    # ---- 3. passed summary (counts only — detail trimmed by design) -------------
     L.append(f"## {t('passed_section')}（{c['pass']}）")
     L.append("")
-    L.append(f"| {t('case')} | {t('category')} | {t('scenario')} | {t('technique')} |")
-    L.append("|---|---|---|---|")
+    per_cat: dict[str, list[int]] = {}
     for r in report.results:
         if r.verdict == "pass":
-            L.append(f"| {r.case.id} | {CATEGORY_LABELS[lang][r.case.category]} "
-                     f"| {r.case.scenario_sid} | {r.case.technique} |")
+            done, total = per_cat.get(r.case.category, [0, 0])
+            per_cat[r.case.category] = [done + 1, total]
+    for r in report.results:
+        cat = r.case.category
+        if cat in per_cat:
+            per_cat[cat][1] += 1
+    for cat, (done, total) in per_cat.items():
+        mark = "✅" if done == total else "⚠️"
+        L.append(f"- {mark} {CATEGORY_LABELS[lang][cat]} {done}/{total} "
+                 f"{'通过' if zh else 'passed'}")
     L.append("")
+
+    # ---- 4. technical appendix (for security engineers) --------------------------
+    L.append(f"## {'技术附录（供安全工程师）' if zh else 'Technical appendix'}")
+    L.append("")
+    L.append(f"| {t('case')} | {t('category')} | {t('scenario')} | {t('technique')} "
+             f"| level | {t('verdict')} | {t('severity')} |")
+    L.append("|---|---|---|---|---|---|---|")
+    for r in report.results:
+        L.append(f"| {r.case.id} | {CATEGORY_LABELS['en'][r.case.category]} "
+                 f"| {r.case.scenario_sid} | {r.case.technique} | {r.level} "
+                 f"| {r.verdict} | {r.severity or '-'} |")
+    L.append("")
+    for r in report.failed() + report.suspicious():
+        L.append(f"#### {r.case.id} {t('payload')} (judge: level={r.level}, "
+                 f"evidence={r.evidence or '-'})")
+        L.append("")
+        L.append("```")
+        L.extend(r.case.payload.splitlines())
+        L.append("```")
+        L.append("")
     return "\n".join(L)
 
 
