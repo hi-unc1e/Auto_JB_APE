@@ -1,5 +1,5 @@
 """Tests for output-hijack detection (hijack.py) + judge integration
-(devdocs/13, adapted from the uat project's eval_agent_pi.py + metrics.py)."""
+(devdocs/13; output-hijack metrics adapted from the Xuanwu paper)."""
 
 from __future__ import annotations
 

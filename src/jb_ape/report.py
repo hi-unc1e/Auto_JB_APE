@@ -1,6 +1,6 @@
-"""Human-readable run report (competition UX).
+"""Human-readable run report (operator UX).
 
-For a 60-submission/day competition, you need to see at a glance: did we win,
+For a tight submission budget, you need to see at a glance: did we win,
 what was the winning payload + mutation chain, where did recon say the defenses
 were, and what's worth promoting to the armory. ``render_report`` formats a
 ``RunReport`` into a compact markdown string for the console / a log file.

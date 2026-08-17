@@ -43,4 +43,4 @@ jb-ape engage status|steer|report --id <id>
 
 ## Budget discipline
 Engagements consume target submissions; default budget 20. Ask the user before
-raising it. 60/day-class quotas: prefer `step` increments over one huge run.
+raising it. Daily-quota-class limits: prefer `step` increments over one huge run.

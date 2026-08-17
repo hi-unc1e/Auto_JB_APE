@@ -1,11 +1,11 @@
 [project]
 name = "jb-ape"
 version = "0.1.0"
-description = "Auto_JB_APE — automated LLM red-team payload wisdom engine (competition red-team research)"
+description = "Auto_JB_APE — automated LLM red-team payload wisdom engine (authorized red-team research)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "unc1e" }]
+authors = [{ name = "jb-ape contributors" }]
 dependencies = []
 
 [project.scripts]

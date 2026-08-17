@@ -153,9 +153,9 @@
 <!-- ══════════════ HERO ══════════════ -->
 <div class="hero">
   <div class="wrap">
-    <div class="eyebrow"><b>competition red-team research</b> · 3 tracks / budget-aware / machine-verified</div>
+    <div class="eyebrow"><b>authorized red-team research</b> · 3 domains / budget-aware / machine-verified</div>
     <h1>自动化 LLM 红队引擎：<br>它负责生成、提交与<span class="en">裁决</span>，你负责编排。</h1>
-    <p class="lead">jb_ape 面向授权越狱比赛（office / ecommerce / coding 三赛道），黑盒驱动目标、感知预算（60 次/天）、经
+    <p class="lead">jb_ape 面向授权红队评估（office / ecommerce / coding 三场景域），黑盒驱动目标、感知预算（可配置）、经
       <code>recon → plan → submit → judge → learn</code> 闭环跨尝试学习。判定由内置三级裁判完成——
       <strong>调用方只消费 verdict，不重复裁决</strong>。</p>
 
@@ -324,7 +324,7 @@ start_engagement        status_engagement
   <div class="wrap">
     <div class="sechead"><span class="secno">§02</span><h2>引擎回路：每一步都在花预算，也都在攒情报</h2></div>
     <p class="secdesc">一次 <code>run</code> 就是这条闭环的循环：先侦察防御画像，随后每轮「规划 → 提交 → 裁判 → 学习」。
-      每次提交都计入预算（比赛 60 次/天）；每次判定都变成下一轮的偏置——bandit 后验、决策树剪枝、改写器的定向变异。</p>
+      每次提交都计入预算（可配置上限）；每次判定都变成下一轮的偏置——bandit 后验、决策树剪枝、改写器的定向变异。</p>
 
     <figure class="svgbox">
       <svg viewBox="0 0 1060 330" role="img" aria-label="引擎闭环：侦察、规划、提交、判定、学习，直到达成或预算耗尽" text-anchor="middle">
@@ -367,7 +367,7 @@ start_engagement        status_engagement
         <ul>
           <li><strong>L1</strong> 输入侧关键词过滤 → 同义词替换 B-I3 / 编码 B-I2</li>
           <li><strong>L2</strong> 系统提示硬化 → 权限覆盖 T-C1、角色重构 T-B2</li>
-          <li><strong>L3</strong> 对齐层（比赛环境偏弱）→ 情景嵌套、格式诱导</li>
+          <li><strong>L3</strong> 对齐层（通常最弱）→ 情景嵌套、格式诱导</li>
           <li><strong>L1out</strong> 输出侧脱敏 → 拆字 B-O1 / 反序 B-O2 / 回调 B-O4</li>
           <li>PPL 过滤激活时自动弃用高困惑度绕过（B-I2/B-I5）</li>
         </ul>
@@ -634,7 +634,7 @@ start_engagement        status_engagement
     </div>
 
     <div class="card" style="margin-top:14px">
-      <h3><span class="dot">●</span> 预算纪律（比赛 60 次提交/天）</h3>
+      <h3><span class="dot">●</span> 预算纪律（提交上限可配置）</h3>
       <ul>
         <li>recon 默认预留 6 次探测（engage 与 <code>run</code> 行为一致；<code>--no-recon</code> / <code>run_recon=False</code> 可关）</li>
         <li>engage 默认预算 20：小步 <code>step</code>（2–4 轮）优于一次跑满；提额前先问操作员</li>

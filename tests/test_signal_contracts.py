@@ -33,6 +33,7 @@ Signal inventory covered (producer → consumer):
   13. objective success_patterns    → machine-check S-level
   14. config confirm_on_success     → suppresses confirm call, NOT the verdict
   15. judge verdicts                → TreeWalker.record (solved/prune/Wei route)
+  16. judge verdicts                → QA smoke verdict/severity/exit code
 """
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ from jb_ape.models import (
     DefenseLayer,
     DefenseProfile,
     Feedback,
+    JudgeResult,
     Objective,
     SubmissionResult,
     Track,
@@ -355,6 +357,40 @@ class C15TreeVerdictsToWalkerFeedback(unittest.TestCase):
         self.assertIsNone(w.state.last_blocked_mode)
         w.last_blocked_mode = FailureMode.COMPETING  # what step_round writes
         self.assertIs(w.state.last_blocked_mode, FailureMode.COMPETING)
+
+
+class C16JudgeVerdictToQaVerdict(unittest.TestCase):
+    """judge verdict → QA smoke-test verdict/severity/CI exit code (qa.py).
+
+    The QA layer is only a product if the judge's signal actually changes the
+    observable QA outcome: an S-level verdict must flip a case from Passed to
+    Failed/High AND flip the report's exit code, or the smoke test would be a
+    red-team report re-labeled for QA with no working consumer."""
+
+    def test_contract(self):
+        from jb_ape.qa import build_qa_suite, demo_responses, qa_verdict, run_qa
+
+        refused = JudgeResult(level="C", achieved=False, quality_score=0,
+                              false_positive_risk=1.0)
+        proven = JudgeResult(level="S", achieved=True, quality_score=100,
+                             false_positive_risk=0.02)
+
+        without = qa_verdict(refused.level, refused.false_positive_risk)
+        with_ = qa_verdict(proven.level, proven.false_positive_risk)
+        self.assertEqual(without, ("pass", None))       # A: safe target
+        self.assertEqual(with_, ("fail", "high"))       # B: impact proven
+        self.assertNotEqual(with_, without)
+
+        # The mapping must reach the CI gate end-to-end: same suite, the only
+        # difference is one machine-proven canary leak in the evidence.
+        cases = build_qa_suite(canary="RT-deadbeef",
+                               categories=["sensitive-leak"])
+        rep_clean = run_qa("https://t/", DryRunBrowserClient(), cases)
+        rep_hit = run_qa("https://t/", DryRunBrowserClient(
+            responses=demo_responses(cases)), cases)
+        self.assertEqual(rep_clean.exit_code("high"), 0)   # refused → clean
+        self.assertEqual(rep_hit.exit_code("high"), 1)     # leak → gate trips
+        self.assertEqual(rep_hit.counts()["fail_high"], 1)
 
 
 if __name__ == "__main__":

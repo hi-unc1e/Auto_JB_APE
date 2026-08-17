@@ -13,7 +13,7 @@ from enum import Enum
 
 
 class Track(str, Enum):
-    """Competition track. Bandit state is keyed per-track to avoid
+    """Scenario domain (track). Bandit state is keyed per-track to avoid
     cross-contamination of technique rewards (see devdocs/05 §5.3)."""
 
     OFFICE = "office"
@@ -27,7 +27,7 @@ class DefenseLayer(str, Enum):
 
     L1 = "L1"        # input-side static keyword filter
     L2 = "L2"        # system-prompt hardening
-    L3 = "L3"        # model alignment (weak in this competition)
+    L3 = "L3"        # model alignment (typically the weakest layer)
     L1_OUT = "L1out"  # output-side keyword filter / redaction
 
 

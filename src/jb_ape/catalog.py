@@ -2,7 +2,7 @@
 
 The "80% of agent red-team problems" coverage claim maps to twelve recurring
 problem categories, distilled from LITMUS's three adversarial paradigms
-(arXiv:2605.10779), our three competition tracks, and the 2026-05~08 research
+(arXiv:2605.10779), three scenario domains, and the 2026-05~08 research
 fusion (devdocs/15). Each scenario wires a category to a ready-to-run
 Objective (track + goal template + success patterns + hijack markers), so a
 practitioner types one command instead of writing Python.

@@ -19,10 +19,13 @@ fail() { echo "✗ [pre-commit] $1" >&2; exit 1; }
 
 staged="$(git diff --cached --name-only)"
 
-# 1) IP / secrets must never be staged
-if echo "$staged" | grep -Eq '(^|/)(devdocs|armory|rsrc/papers|\.claude|\.idea|\.playwright-mcp)/|(^|/)\.env|\.log$|^exploit\.html$|^exfil2\.html$|^\.DS_Store$'; then
-    echo "$staged" | grep -E '(^|/)(devdocs|armory|rsrc/papers|\.claude|\.idea|\.playwright-mcp)/|(^|/)\.env|\.log$|^exploit\.html$|^exfil2\.html$|^\.DS_Store$'
-    fail "staged files above are competition IP / credentials (guide §3 #11) — unstage them"
+# 1) IP / secrets must never be staged. The ONLY exemption is the tracked,
+#    secret-free template ``.env.example`` (every other .env* carries real
+#    credentials and stays blocked).
+blocked="$(echo "$staged" | grep -E '(^|/)(devdocs|armory|rsrc/papers|\.claude|\.idea|\.playwright-mcp)/|(^|/)\.env|\.log$|^exploit\.html$|^exfil2\.html$|^\.DS_Store$' | grep -v -E '(^|/)\.env\.example$' || true)"
+if [ -n "$blocked" ]; then
+    echo "$blocked"
+    fail "staged files above are internal research IP / credentials (guide §3 #11) — unstage them"
 fi
 
 # 2) ruff gate (fail closed when ruff is absent)
