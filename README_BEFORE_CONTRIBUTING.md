@@ -14,7 +14,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests            # 全部单元�
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # 严格模式
 ```
 
-当前基线：**360 tests / ruff clean**。任何 PR 若使上述变红即不合格。
+当前基线：**371 tests / ruff clean**。任何 PR 若使上述变红即不合格。
 
 **本节不是自觉，是机械强制**：`hooks/pre-commit` 在每次提交前自动执行——
 IP/凭据泄漏扫描（§3 #11）→ `ruff check`（ruff 缺失即拒绝提交）→ 当 `src/` 或
@@ -54,12 +54,14 @@ src/jb_ape/
 ├── armory.py      信号持久化（seeds/priors/chains/triggers/runs）
 ├── report.py      人类可读报告
 ├── qa.py          QA 冒烟测试（固定 24 用例套件 → pass/suspicious/fail 报告）
+├── bridge.py      浏览器插件桥（SessionBridge 回环队列 + ExtensionBrowserClient）
 └── cli.py         jb-ape 命令（scenarios/recon/run/sweep/qa/engage）
 
 armory/            种子库/先验/有效链/侦察探针/交战快照   （gitignored，本地）
 devdocs/           17 篇知识库（人类参考，可能与代码漂移）  （gitignored，本地）
 skills/jb-ape/     宿主 Agent 技能文档
-tests/             360 项；含 16 条信号契约、各红线守卫与 contributing gate
+tests/             371 项；含 17 条信号契约、各红线守卫与 contributing gate
+browser_ext/       MV3 浏览器插件（复用登录态的 ext 适配器端）
 ```
 
 **运行时依赖仅可选**（openai/fastmcp/yaml 均懒加载）；核心引擎纯 stdlib 可离线全测。
@@ -137,6 +139,7 @@ Scenario(
 | 11 | **`legacy/` 与 `rsrc/papers/` 不入库**；`devdocs/ armory/ .env` 永不推送 | 内部研究 IP / 凭据 / 大二进制 | `.gitignore`（评审即查） |
 | 12 | **Steer 语义保持可观察**（`[operator context]` 行）；disable 走 `disabled_families` | 文档=实现，不许黑盒化 | `test_engagement.TestSteer` |
 | 13 | **QA 套件确定性**（固定配方/固定 id，不随 bandit 漂移）；**裁决映射** S/A/B/C → fail/suspicious/pass 且到达退出码 | QA 冒烟是产品不是脚本 | `test_qa.py` / `test_signal_contracts.C16` |
+| 14 | **扩展桥只监听 127.0.0.1**；插件抓到的 api_tap 必须进 `api_responses` 证据通道并到达裁决（S 级）| 复用 Session 的对接方式不能产出无消费者证据 | `test_bridge.py` / `test_signal_contracts.C17` |
 
 另：**不要**为绕过某条不变量而改其守护测试——改约束本身需在 devdocs 先立项并
 同步更新契约（16/17 篇是设计源，代码是真相，二者冲突以代码+测试为准）。

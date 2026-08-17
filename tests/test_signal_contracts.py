@@ -34,6 +34,7 @@ Signal inventory covered (producer → consumer):
   14. config confirm_on_success     → suppresses confirm call, NOT the verdict
   15. judge verdicts                → TreeWalker.record (solved/prune/Wei route)
   16. judge verdicts                → QA smoke verdict/severity/exit code
+  17. extension api_tap             → judge api_responses → S verdict/exit code
 """
 
 from __future__ import annotations
@@ -394,6 +395,77 @@ class C16JudgeVerdictToQaVerdict(unittest.TestCase):
         self.assertEqual(rep_clean.exit_code("high"), 0)   # refused → clean
         self.assertEqual(rep_hit.exit_code("high"), 1)     # leak → gate trips
         self.assertEqual(rep_hit.counts()["fail_high"], 1)
+
+
+class C17ExtensionTapToJudgeEvidence(unittest.TestCase):
+    """extension api_tap → judge api_responses → S verdict + QA exit code.
+
+    The browser-extension bridge is only a real integration if the evidence
+    the extension produces changes the outcome: a canary leaking into a
+    tapped XHR body (what browser_ext/inject.js captures) must flip the case
+    from Passed to Failed/High end-to-end — otherwise the extension path
+    would ship evidence no consumer reads."""
+
+    def test_contract(self):
+        import threading
+        import urllib.request
+
+        from jb_ape.bridge import ExtensionBrowserClient
+
+        def free_port():
+            import socket
+            with socket.socket() as s:
+                s.bind(("127.0.0.1", 0))
+                return s.getsockname()[1]
+
+        class FakeExt(threading.Thread):
+            def __init__(self, base, tap_body):
+                super().__init__(daemon=True)
+                self.base, self.tap_body = base, tap_body
+
+            def run(self):
+                import json as _json
+                import time as _time
+                deadline = _time.time() + 20
+                while _time.time() < deadline:
+                    try:
+                        with urllib.request.urlopen(f"{self.base}/poll",
+                                                    timeout=5) as r:
+                            jobs = _json.loads(r.read())["jobs"]
+                    except OSError:
+                        return
+                    for job in jobs:
+                        result = {"id": job["id"], "ok": True}
+                        if job["action"] == "submit":
+                            result["dom_text"] = "Transfer complete."
+                            result["api_tap"] = [
+                                {"url": "https://t/api/send",
+                                 "body": self.tap_body}]
+                        req = urllib.request.Request(
+                            f"{self.base}/result",
+                            data=_json.dumps(result).encode("utf-8"),
+                            headers={"Content-Type": "application/json"},
+                            method="POST")
+                        urllib.request.urlopen(req, timeout=5).read()
+                    _time.sleep(0.02)
+
+        def run_case(tap_body):
+            client = ExtensionBrowserClient(port=free_port(),
+                                            case_timeout=10, open_timeout=10)
+            FakeExt(client.bridge.url, tap_body).start()
+            from jb_ape.qa import build_qa_suite, run_qa
+            cases = build_qa_suite(canary="RT-deadbeef",
+                                   categories=["sensitive-leak"])
+            rep = run_qa("https://t/", client, cases, adapter="ext")
+            client.stop()
+            return rep
+
+        clean = run_case('{"msg": "nothing here"}')            # A: no leak
+        leak = run_case('{"msg": "token RT-deadbeef"}')        # B: canary out
+        self.assertEqual(clean.exit_code("high"), 0)
+        self.assertEqual(leak.exit_code("high"), 1)            # gate trips
+        # both category cases share the tapped evidence → both fail high
+        self.assertEqual(leak.counts()["fail_high"], len(leak.results))
 
 
 if __name__ == "__main__":

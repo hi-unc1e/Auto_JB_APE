@@ -6,7 +6,10 @@ Subcommands:
   run      --scenario S --url X   full loop on ONE scenario, print report
   sweep    [--track T] --url X    run every matching scenario on a small budget
   qa       --url X                FIXED baseline suite → QA-style report
-                                  (deterministic, no search; see README_QA.md)
+                                  (deterministic, no search; see README_QA.md);
+                                  --adapter ext runs the cases through the
+                                  browser extension in YOUR logged-in session
+                                  (browser_ext/ + loopback-only bridge)
 
 Examples:
   jb-ape scenarios
@@ -39,7 +42,8 @@ from jb_ape.models import Objective, Track
 from jb_ape.report import render_report
 
 
-def _adapter(name: str, llm_model: str | None, llm_base_url: str | None):
+def _adapter(name: str, llm_model: str | None, llm_base_url: str | None,
+             ext_port: int | None = None, ext_timeout: float | None = None):
     if name == "dryrun":
         from jb_ape.browser import DryRunBrowserClient
 
@@ -54,6 +58,11 @@ def _adapter(name: str, llm_model: str | None, llm_base_url: str | None):
         if not llm_model:
             raise SystemExit("--adapter llm requires --llm-model")
         return LLMTargetClient(model=llm_model, base_url=llm_base_url)
+    if name == "ext":
+        from jb_ape.bridge import ExtensionBrowserClient
+
+        return ExtensionBrowserClient(
+            port=ext_port or 8765, case_timeout=ext_timeout or 240.0)
     raise SystemExit(f"unknown adapter: {name}")
 
 
@@ -102,7 +111,9 @@ def cmd_recon(args) -> int:
     from jb_ape.armory import Armory
     from jb_ape.recon import Recon
 
-    browser = _adapter(args.adapter, args.llm_model, args.llm_base_url)
+    browser = _adapter(args.adapter, args.llm_model, args.llm_base_url,
+                      ext_port=getattr(args, 'ext_port', None),
+                      ext_timeout=getattr(args, 'ext_timeout', None))
     report = Recon(armory=Armory(args.armory)).run(browser, args.url,
                                                    budget=args.recon_budget)
     p = report.profile
@@ -124,7 +135,9 @@ def cmd_run(args) -> int:
     from jb_ape.generator import RunConfig
 
     obj, markers = _objective_from(args)
-    browser = _adapter(args.adapter, args.llm_model, args.llm_base_url)
+    browser = _adapter(args.adapter, args.llm_model, args.llm_base_url,
+                      ext_port=getattr(args, 'ext_port', None),
+                      ext_timeout=getattr(args, 'ext_timeout', None))
     gen_llm, judge_llm = _llms(args.llm_model, args.llm_base_url)
     print(f"[run] scenario={args.scenario or '-'} track={obj.track.value} "
           f"adapter={args.adapter}")
@@ -153,7 +166,9 @@ def cmd_sweep(args) -> int:
     from jb_ape.generator import RunConfig
 
     track = Track(args.track) if args.track else None
-    browser = _adapter(args.adapter, args.llm_model, args.llm_base_url)
+    browser = _adapter(args.adapter, args.llm_model, args.llm_base_url,
+                      ext_port=getattr(args, 'ext_port', None),
+                      ext_timeout=getattr(args, 'ext_timeout', None))
     gen_llm, judge_llm = _llms(args.llm_model, args.llm_base_url)
     rows = []
     for sc in scenarios_for_track(track):
@@ -231,7 +246,25 @@ def cmd_qa(args) -> int:
         raise SystemExit("--demo scripts offline responses; it requires "
                          "--adapter dryrun")
 
-    browser = _adapter(args.adapter, args.llm_model, args.llm_base_url)
+    browser = _adapter(args.adapter, args.llm_model, args.llm_base_url,
+                       ext_port=getattr(args, "ext_port", None),
+                       ext_timeout=getattr(args, "ext_timeout", None))
+    if args.adapter == "ext":
+        print("[qa] 浏览器插件模式（复用你已登录的会话，仅本机回环通信）:",
+              file=sys.stderr)
+        print("[qa]   1. 在你的浏览器安装 browser_ext/ 扩展（见 browser_ext/README.md）",
+              file=sys.stderr)
+        print("[qa]   2. 打开并登录目标页面，保持该标签页在前台",
+              file=sys.stderr)
+        print(f"[qa]   3. 等待插件接入 {browser.bridge.url} …",
+              file=sys.stderr)
+        if not browser.wait_for_extension(timeout=args.ext_wait):
+            browser.stop()
+            print(f"[qa] {args.ext_wait:.0f}s 内没有插件接入 —— 确认扩展已启用、"
+                  f"端口 {args.ext_port} 未被占用后重试", file=sys.stderr)
+            raise SystemExit(2)
+        print("[qa] 插件已接入，开始执行用例（每条用例会刷新页面以隔离会话）",
+              file=sys.stderr)
     if args.demo:
         from jb_ape.browser import DryRunBrowserClient
 
@@ -267,6 +300,8 @@ def cmd_qa(args) -> int:
         n = save_regression(args.regression, rep)
         print(f"[qa] regression corpus {args.regression}: {n} case(s)",
               file=sys.stderr)
+    if args.adapter == "ext":
+        browser.stop()
     code = rep.exit_code(args.fail_on)
     if code:
         print(f"[qa] exit {code} — findings at/above fail-on={args.fail_on}"
@@ -381,7 +416,14 @@ def build_parser() -> argparse.ArgumentParser:
         "qa", help="QA smoke test: fixed baseline suite → QA-style report")
     pq.add_argument("--url", help="target base URL (any value for dryrun)")
     pq.add_argument("--adapter", default="dryrun",
-                    choices=["dryrun", "browser", "llm"])
+                    choices=["dryrun", "browser", "llm", "ext"])
+    pq.add_argument("--ext-port", type=int, default=8765,
+                    help="adapter ext: loopback bridge port")
+    pq.add_argument("--ext-timeout", type=float, default=240.0,
+                    help="adapter ext: per-case timeout in seconds")
+    pq.add_argument("--ext-wait", type=float, default=90.0,
+                    help="adapter ext: seconds to wait for the extension to "
+                         "connect before giving up")
     pq.add_argument("--llm-model")
     pq.add_argument("--llm-base-url")
     pq.add_argument("--categories",
@@ -413,7 +455,11 @@ def _common(sp, url: bool = False) -> None:
     if url:
         sp.add_argument("--url", required=True)
     sp.add_argument("--adapter", default="dryrun",
-                    choices=["dryrun", "browser", "llm"])
+                    choices=["dryrun", "browser", "llm", "ext"])
+    sp.add_argument("--ext-port", type=int, default=8765,
+                    help="adapter ext: loopback bridge port")
+    sp.add_argument("--ext-timeout", type=float, default=240.0,
+                    help="adapter ext: per-case timeout in seconds")
     sp.add_argument("--armory", default="armory")
     sp.add_argument("--recon-budget", type=int, default=6)
     sp.add_argument("--budget", type=int, default=20)

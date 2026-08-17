@@ -1,7 +1,7 @@
 # jb_ape — Agent Red-Team Engine with Machine-Verified Verdicts
 
 [![python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)]()
-[![tests](https://img.shields.io/badge/tests-360%20passing-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-371%20passing-brightgreen)]()
 [![lint](https://img.shields.io/badge/ruff-clean-success)]()
 [![license](https://img.shields.io/badge/license-MIT-informational)]()
 [![authorized use only](https://img.shields.io/badge/use-authorized%20targets%20only-e5484d)]()
@@ -21,11 +21,15 @@ submission budget.
 **QA / shift-left fast path** — not a red-teamer? `jb-ape qa` runs a fixed
 24-case baseline suite (prompt injection, indirect injection, sensitive-data
 leakage, tool misuse, excessive agency, unauthorized data access) and reports
-in QA vocabulary — pass/suspicious/failed + severity + evidence + repro, with
-CI exit codes and a regression corpus. See **[README_QA.md](README_QA.md)**:
+in QA vocabulary — a one-page release conclusion, plain-language findings
+with fix directions, evidence + repro, CI exit codes, and a regression corpus.
+See **[README_QA.md](README_QA.md)**:
 
 ```bash
 jb-ape qa --url https://t/ --adapter llm --llm-model m   # 24 fixed cases → QA report
+jb-ape qa --url https://t/ --adapter ext              # …or through the browser
+                                                      # extension in your own
+                                                      # logged-in session
 ```
 
 ---
@@ -154,6 +158,10 @@ jb-ape run --scenario data-exfil --url https://example/ --adapter dryrun
 # QA smoke test (fixed suite, offline demo of the report shape):
 jb-ape qa --url https://demo/ --adapter dryrun --demo
 
+# QA smoke against a web agent in YOUR logged-in browser (install
+# browser_ext/ once, see browser_ext/README.md):
+jb-ape qa --url https://agent-web/ --adapter ext
+
 # against a real OpenAI-compatible target:
 export OPENAI_API_KEY=... OPENAI_BASE_URL=...
 pip install openai pyyaml            # optional adapters
@@ -235,6 +243,10 @@ foreign user's data in an API response; **coding** = dangerous API in output
   `confirm_submit`. The built-in adapter drives the `agent-browser` CLI.
 - **API targets** — `--adapter llm` treats any OpenAI-compatible chat endpoint
   as the target; replies land in `api_responses`, the judge's most-trusted channel.
+- **Logged-in web targets** — `--adapter ext` drives a small MV3 extension
+  (`browser_ext/`) installed in the operator's own browser: the loopback bridge
+  (`bridge.py`) reuses the existing session, and the extension taps in-page
+  fetch/XHR so API-level evidence still reaches the judge.
 - **LLMs** — pass **separate** instances: `generator_llm=` drives mutation,
   `judge_llm=` drives tier-3 adjudication, `gate_llm=` (optional) prunes
   off-topic prompts before they cost budget.
@@ -246,13 +258,13 @@ rewarding arms it never sampled; a recon profile nobody read). The cure is now a
 rule: **a signal with no observable consumer is dead code, no matter how well its
 producer is unit-tested.** Every capability must name its producer, its consumer,
 and pass a with/without contract test in `tests/test_signal_contracts.py` —
-currently **16 signal contracts** covering recon→planner, PPL→rewriter,
-verdict→tree, verdict→QA-report, and more, inside a **360-test** offline suite
-(no network, no LLM, no browser).
+currently **17 signal contracts** covering recon→planner, PPL→rewriter,
+verdict→tree, verdict→QA-report, extension-tap→judge, and more, inside a
+**371-test** offline suite (no network, no LLM, no browser).
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 360 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 371 tests
 git config core.hooksPath hooks                               # enable the commit gate
 ```
 
@@ -272,8 +284,9 @@ real suite.
 src/jb_ape/        the engine — models · facade · generator · planner · dtree
                    judge · rewriter · recon · defense · jailbreak · catalog
                    engagement · mcp_server · cli · targets · browser · armory
-                   qa (QA smoke suite) · report
-tests/             360 offline tests, incl. 16 signal-contract tests
+                   qa (QA smoke suite) · bridge (ext session bridge) · report
+tests/             371 offline tests, incl. 17 signal-contract tests
+browser_ext/       MV3 extension for the logged-in-session adapter
 hooks/             pre-commit gate: IP-scan · ruff · full suite
 skills/jb-ape/     host Skill for agent integrators
 armory/            persisted signals: seeds · priors · chains · run logs (gitignored)

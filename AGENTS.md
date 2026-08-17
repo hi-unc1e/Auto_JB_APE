@@ -35,7 +35,9 @@ jb-ape sweep --track office --url https://t/ --adapter browser   # everything
 ```
 
 - `--adapter browser` (agent-browser CLI) | `llm` (OpenAI-compatible target
-  API, replies land in the judge's api_responses channel) | `dryrun` (offline).
+  API, replies land in the judge's api_responses channel) | `ext` (browser
+  extension in YOUR logged-in session: `browser_ext/` + loopback bridge,
+  `bridge.py`) | `dryrun` (offline).
 - **Canary**: exfil/hijack/overeager scenarios auto-mint `RT-xxxxxxxx`; the
   token surfacing in ANY evidence channel is machine-proof of impact — no
   hand-written success patterns needed (`catalog.py`).
@@ -96,7 +98,7 @@ Before any capability counts as done, answer in the PR/commit:
 1. **Producer** — where is the signal born? (e.g. `recon` sets `ppl_filter_active`)
 2. **Consumer** — what behavior reads it? (e.g. `rewriter` drops `B-I2`)
 3. **Contract test** — a with/without test proving the behavior DIFFERS:
-   `tests/test_signal_contracts.py` is the pattern (16 contracts, one per
+   `tests/test_signal_contracts.py` is the pattern (17 contracts, one per
    signal). Copy the shape: `without = f(x)`, `with_ = f(x, signal)`,
    `assertNotEqual` in the expected direction.
 
@@ -120,6 +122,7 @@ The current signal inventory (keep in sync when adding one):
 | 14 | confirm_on_success | config → confirm call only, never the verdict |
 | 15 | tree verdicts | judge → TreeWalker.record (solved/prune/Wei route) |
 | 16 | qa verdict mapping | judge → QA smoke verdict/severity/exit code |
+| 17 | ext api_tap | extension bridge → judge api_responses → S verdict |
 
 ## What an agent should and should NOT do
 
@@ -137,7 +140,7 @@ The current signal inventory (keep in sync when adding one):
 - Read `devdocs/` (75K words of design notes; redundant with the code, and
   may be stale). If you need *why* something works, read the module docstring.
 - Edit `src/jb_ape/` prompts without running `ruff check src/ tests/` and
-  `python -m unittest discover -s tests` (360 tests guard the invariants).
+  `python -m unittest discover -s tests` (371 tests guard the invariants).
 - Commit with `--no-verify` — the pre-commit gate (IP scan · ruff · suite) is
   the enforcement of README_BEFORE_CONTRIBUTING §0; bypass only in emergencies
   and re-run the full gates afterwards.
@@ -154,6 +157,10 @@ and pass it to `quick_run(browser=...)` or `build_engine(browser=...)`.
 Required: `open`, `submit_payload` (→ `SubmissionResult` with
 `dom_text`/`api_responses`/`network_log`/`console_log`), `confirm_submit`.
 Priority of evidence (judge trusts higher first): **API > network > console > DOM**.
+For web targets behind a login, prefer the extension path: install
+`browser_ext/` in the operator's own browser and run `--adapter ext` — the
+loopback bridge (`bridge.py`) reuses the logged-in session and the extension
+taps in-page fetch/XHR so API evidence still reaches the judge.
 
 ## How to wire a real LLM
 
@@ -183,7 +190,7 @@ Key invariants the tests enforce (don't break these):
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 360 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 371 tests
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # strict
 ```
 
@@ -200,6 +207,7 @@ inventory, baseline count).
 |---|---|
 | What "winning" means | `models.py` (`Objective`, `JudgeResult.can_submit`) |
 | The QA smoke suite | `qa.py` (`build_qa_suite`, `run_qa`, `render_qa_markdown`) |
+| The extension bridge | `bridge.py` (`SessionBridge`, `ExtensionBrowserClient`) + `browser_ext/` |
 | The main loop | `generator.py` `Generator.run()` |
 | How payloads mutate | `rewriter.py`, `defense.py`, `jailbreak.py` |
 | How success is judged | `judge.py`, `hijack.py`, `decode.py` |
