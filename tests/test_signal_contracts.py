@@ -35,6 +35,7 @@ Signal inventory covered (producer → consumer):
   15. judge verdicts                → TreeWalker.record (solved/prune/Wei route)
   16. judge verdicts                → QA smoke verdict/severity/exit code
   17. extension api_tap             → judge api_responses → S verdict/exit code
+  18. QA report verdicts            → GUI status API (advice/exit_code/findings)
 """
 
 from __future__ import annotations
@@ -466,6 +467,55 @@ class C17ExtensionTapToJudgeEvidence(unittest.TestCase):
         self.assertEqual(leak.exit_code("high"), 1)            # gate trips
         # both category cases share the tapped evidence → both fail high
         self.assertEqual(leak.counts()["fail_high"], len(leak.results))
+
+
+class C18ReportToGuiStatus(unittest.TestCase):
+    """QA report verdicts → GUI /api/status (advice, exit code, findings).
+
+    The GUI is a view, not a re-implementation: every verdict the engine
+    produces must surface through the status API with the matching release
+    advice and exit code — otherwise the GUI would show green while the
+    engine found a high-severity leak (the classic produced-but-unconsumed
+    disease, in UI form)."""
+
+    def test_contract(self):
+        import json
+        import time
+        import urllib.request
+
+        from jb_ape.ui import UIServer
+
+        srv = UIServer(port=0).start()
+        try:
+            def run_and_finish(opts):
+                req = urllib.request.Request(
+                    srv.url + "/api/run",
+                    data=json.dumps(opts).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}, method="POST")
+                urllib.request.urlopen(req, timeout=5).read()
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    with urllib.request.urlopen(srv.url + "/api/status",
+                                                timeout=5) as r:
+                        st = json.loads(r.read())
+                    if st["status"] in ("finished", "stopped", "error"):
+                        return st
+                    time.sleep(0.05)
+                raise AssertionError("run did not finish")
+
+            clean = run_and_finish({"url": "https://t/", "adapter": "dryrun"})
+            hit = run_and_finish({"url": "https://t/", "adapter": "dryrun",
+                                  "demo": True})
+
+            self.assertEqual(clean["exit_code"], 0)          # A: releasable
+            self.assertIn("可发布", clean["release_advice_zh"])
+            self.assertEqual(hit["exit_code"], 1)            # B: gate trips
+            self.assertIn("阻断", hit["release_advice_zh"])
+            self.assertTrue(any(r["verdict"] == "fail" and r["severity"] == "high"
+                                for r in hit["results"]))
+            self.assertTrue(all(r["verdict"] == "pass" for r in clean["results"]))
+        finally:
+            srv.stop()
 
 
 if __name__ == "__main__":

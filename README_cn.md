@@ -1,7 +1,7 @@
 # jb_ape — 带机器验证判定的 Agent 红队引擎
 
 [![python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)]()
-[![tests](https://img.shields.io/badge/tests-371%20passing-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-383%20passing-brightgreen)]()
 [![lint](https://img.shields.io/badge/ruff-clean-success)]()
 [![license](https://img.shields.io/badge/license-MIT-informational)]()
 [![仅限授权目标](https://img.shields.io/badge/%E4%BD%BF%E7%94%A8-%E4%BB%85%E9%99%90%E6%8E%88%E6%9D%83%E7%9B%AE%E6%A0%87-e5484d)]()
@@ -129,6 +129,7 @@ flowchart TD
 
 ```bash
 pip install -e .                     # 核心零第三方依赖
+jb-ape ui                            # 本机 Web GUI：配置 → 执行 → 报告
 jb-ape scenarios                     # 12 个预置场景、9 类问题
 
 # 离线机制验证（无靶标、无网络）：
@@ -224,12 +225,12 @@ jb-ape engage report --id <id>
 这个代码库被"信号产出了却没人消费"坑过两次（bandit 奖励从未采样的臂；recon 画像无人读取）。
 解药已成铁律：**没有可观测消费者的信号就是死代码，哪怕它的生产者单元测试写得再好。**
 每个能力必须写明生产者、消费者，并通过 `tests/test_signal_contracts.py` 的
-with/without 契约测试——当前 **17 个信号契约**（recon→规划器、PPL→改写器、判定→决策树、
-判定→QA 报告、插件证据→裁决……），守护在一个 **371 项**全离线测试套件之内（无网络、无 LLM、无浏览器）。
+with/without 契约测试——当前 **18 个信号契约**（recon→规划器、PPL→改写器、判定→决策树、
+判定→QA 报告、插件证据→裁决、报告→GUI……），守护在一个 **383 项**全离线测试套件之内（无网络、无 LLM、无浏览器）。
 
 ```bash
 ruff check src/ tests/                                        # 必须干净
-PYTHONPATH=src python3 -m unittest discover -s tests          # 371 个测试
+PYTHONPATH=src python3 -m unittest discover -s tests          # 383 个测试
 git config core.hooksPath hooks                               # 启用提交门禁（一次）
 ```
 
@@ -248,8 +249,8 @@ git config core.hooksPath hooks                               # 启用提交门�
 src/jb_ape/        引擎本体 — models · facade · generator · planner · dtree
                    judge · rewriter · recon · defense · jailbreak · catalog
                    engagement · mcp_server · cli · targets · browser · armory
-                   qa（QA 冒烟套件）· bridge（插件会话桥）· report
-tests/             371 项离线测试，含 17 个信号契约测试
+                   qa（QA 冒烟套件）· bridge（插件会话桥）· report · ui（本机 GUI）
+tests/             383 项离线测试，含 18 个信号契约测试
 browser_ext/       登录态插件（ext 适配器端，MV3）
 hooks/             pre-commit 提交门禁：IP 扫描 · ruff · 全量套件
 skills/jb-ape/     供 Agent 集成方的宿主 Skill

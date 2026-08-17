@@ -1,6 +1,8 @@
 """jb-ape CLI — one-command agent red-teaming.
 
 Subcommands:
+  ui                              local web GUI: config → run → report
+                                 (jb-ape ui, opens http://127.0.0.1:8788)
   scenarios                       list the preset problem catalog
   recon    --url X [--adapter ..] probe defenses, print the DefenseProfile
   run      --scenario S --url X   full loop on ONE scenario, print report
@@ -193,6 +195,13 @@ def cmd_sweep(args) -> int:
                    render_report(rep, url=args.url))
     hit = sum(1 for _, r in rows if r.achieved)
     print(f"[sweep] {hit}/{len(rows)} scenarios achieved")
+    return 0
+
+
+def cmd_ui(args) -> int:
+    from jb_ape.ui import serve
+
+    serve(port=args.port, open_browser=not args.no_open)
     return 0
 
 
@@ -412,6 +421,12 @@ def build_parser() -> argparse.ArgumentParser:
                     choices=["bandit", "tree"])
     ps.add_argument("--out")
 
+    pui = sub.add_parser("ui", help="local web GUI (config → run → report)")
+    pui.add_argument("--port", type=int, default=8788,
+                     help="loopback port to serve the GUI on (default 8788)")
+    pui.add_argument("--no-open", action="store_true",
+                     help="do not auto-open the browser")
+
     pq = sub.add_parser(
         "qa", help="QA smoke test: fixed baseline suite → QA-style report")
     pq.add_argument("--url", help="target base URL (any value for dryrun)")
@@ -481,6 +496,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_sweep(args)
     if args.cmd == "qa":
         return cmd_qa(args)
+    if args.cmd == "ui":
+        return cmd_ui(args)
     if args.cmd == "engage":
         return cmd_engage(args)
     return 2

@@ -19,13 +19,15 @@ tree search.
 This is security research tooling. Use only against authorized targets.
 
 **QA quick path**: if you are a QA engineer (not a red-teamer), you want the
-smoke test, not the search loop — `jb-ape qa` runs a fixed 24-case baseline
-suite and reports in QA vocabulary (pass/suspicious/failed + severity +
-evidence + repro). See `README_QA.md`.
+smoke test, not the search loop — `jb-ape ui` opens a local web GUI (or
+`jb-ape qa` on the CLI) that runs a fixed 24-case baseline suite and reports
+in QA vocabulary (release advice + plain findings + evidence + repro).
+See `README_QA.md`.
 
 ## The CLI (preferred for humans; the 4-line API below for agents)
 
 ```bash
+jb-ape ui                                          # local web GUI (config→run→report)
 jb-ape qa --url https://t/ --adapter llm --llm-model m   # QA smoke (fixed suite)
 jb-ape scenarios                                    # 12 preset problem scenarios
 jb-ape recon --url https://t/ --adapter browser     # probe defenses first
@@ -98,7 +100,7 @@ Before any capability counts as done, answer in the PR/commit:
 1. **Producer** — where is the signal born? (e.g. `recon` sets `ppl_filter_active`)
 2. **Consumer** — what behavior reads it? (e.g. `rewriter` drops `B-I2`)
 3. **Contract test** — a with/without test proving the behavior DIFFERS:
-   `tests/test_signal_contracts.py` is the pattern (17 contracts, one per
+   `tests/test_signal_contracts.py` is the pattern (18 contracts, one per
    signal). Copy the shape: `without = f(x)`, `with_ = f(x, signal)`,
    `assertNotEqual` in the expected direction.
 
@@ -123,6 +125,7 @@ The current signal inventory (keep in sync when adding one):
 | 15 | tree verdicts | judge → TreeWalker.record (solved/prune/Wei route) |
 | 16 | qa verdict mapping | judge → QA smoke verdict/severity/exit code |
 | 17 | ext api_tap | extension bridge → judge api_responses → S verdict |
+| 18 | qa report → GUI | report verdicts/advice → ui.py status API |
 
 ## What an agent should and should NOT do
 
@@ -140,7 +143,7 @@ The current signal inventory (keep in sync when adding one):
 - Read `devdocs/` (75K words of design notes; redundant with the code, and
   may be stale). If you need *why* something works, read the module docstring.
 - Edit `src/jb_ape/` prompts without running `ruff check src/ tests/` and
-  `python -m unittest discover -s tests` (371 tests guard the invariants).
+  `python -m unittest discover -s tests` (383 tests guard the invariants).
 - Commit with `--no-verify` — the pre-commit gate (IP scan · ruff · suite) is
   the enforcement of README_BEFORE_CONTRIBUTING §0; bypass only in emergencies
   and re-run the full gates afterwards.
@@ -190,7 +193,7 @@ Key invariants the tests enforce (don't break these):
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 371 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 383 tests
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # strict
 ```
 
@@ -208,6 +211,7 @@ inventory, baseline count).
 | What "winning" means | `models.py` (`Objective`, `JudgeResult.can_submit`) |
 | The QA smoke suite | `qa.py` (`build_qa_suite`, `run_qa`, `render_qa_markdown`) |
 | The extension bridge | `bridge.py` (`SessionBridge`, `ExtensionBrowserClient`) + `browser_ext/` |
+| The local web GUI | `ui.py` (`UIServer`, `serve`) — same engine, page-driven |
 | The main loop | `generator.py` `Generator.run()` |
 | How payloads mutate | `rewriter.py`, `defense.py`, `jailbreak.py` |
 | How success is judged | `judge.py`, `hijack.py`, `decode.py` |

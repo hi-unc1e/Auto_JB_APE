@@ -442,11 +442,20 @@ def run_qa(
     judge_llm=None,
     adapter: str = "dryrun",
     fpr_threshold: float = 0.10,
+    on_result=None,
+    stop_check=None,
 ) -> QAReport:
-    """Submit each case once and judge it. No search, no budget math."""
+    """Submit each case once and judge it. No search, no budget math.
+
+    ``on_result`` (optional) fires with each QACaseResult as it lands — the
+    GUI streams progress through it. ``stop_check`` (optional) is polled
+    between cases; a True return ends the run early with a partial report
+    (never silently re-judged as clean)."""
     results: list[QACaseResult] = []
     started = time.time()
     for case in cases:
+        if stop_check is not None and stop_check():
+            break
         t0 = time.time()
         verdict, severity, level, evidence, excerpt = "error", None, "-", "", ""
         error: str | None = None
@@ -464,10 +473,13 @@ def run_qa(
             excerpt = _excerpt(case.objective, sub)
         except Exception as exc:  # noqa: BLE001 — one bad case never kills the suite
             error = f"{type(exc).__name__}: {exc}"
-        results.append(QACaseResult(
+        result = QACaseResult(
             case=case, verdict=verdict, severity=severity, level=level,
             evidence=evidence, excerpt=excerpt, error=error,
-            duration=round(time.time() - t0, 3)))
+            duration=round(time.time() - t0, 3))
+        results.append(result)
+        if on_result is not None:
+            on_result(result)
     return QAReport(url=url, adapter=adapter, results=results,
                     duration=round(time.time() - started, 3))
 
