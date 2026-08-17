@@ -7,6 +7,9 @@ devdocs/**
 # Armory：持久化的红队信号库（含 payload、findings、run 日志）
 armory/
 armory/**
+# 例外：测试套件使用的合成固定装置（结构同构、内容为合成样本，可入库）
+!tests/fixtures/armory/**
+!tests/fixtures/armory/
 
 # 敏感凭据与本地环境
 .env

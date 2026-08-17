@@ -1,0 +1,9 @@
+# Synthetic fixture chains for the test suite (structure-faithful).
+chains:
+  - id: "CHN-01"
+    name: "EML carrier → format induction → output unwrap (fixture)"
+    tracks: [office]
+    target_layers: [L2, L1out]
+    sequence: [EMI-01, T-D1, B-O1]
+    description: "fixture chain: seed carrier, then completion pressure, then output-side unwrap"
+    asr_prior: 0.4

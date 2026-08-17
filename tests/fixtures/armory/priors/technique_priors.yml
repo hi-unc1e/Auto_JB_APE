@@ -1,0 +1,20 @@
+# Synthetic fixture priors for the test suite (structure-faithful).
+# NOTE (hygiene, TestPriorsYamlHygiene): each top-level section appears EXACTLY
+# once — duplicate keys silently replace whole sections in YAML.
+default:
+  T-A1: [1.5, 2.0]
+  T-D3: [2.0, 1.5]
+  T-F1: [1.2, 1.5]
+  T-F2: [1.2, 1.5]
+  T-F3: [1.2, 1.5]
+  T-F4: [1.2, 1.5]
+office:
+  EMI-01: [2.5, 1.0]
+  T-A1: [2.0, 2.0]
+ecommerce:
+  T-C1: [2.0, 1.5]
+coding:
+  T-F1: [8.0, 1.2]
+  T-F2: [3.0, 1.5]
+  T-F3: [3.0, 1.5]
+  T-F4: [3.0, 1.5]

@@ -19,10 +19,12 @@ fail() { echo "✗ [pre-commit] $1" >&2; exit 1; }
 
 staged="$(git diff --cached --name-only)"
 
-# 1) IP / secrets must never be staged. The ONLY exemption is the tracked,
-#    secret-free template ``.env.example`` (every other .env* carries real
-#    credentials and stays blocked).
-blocked="$(echo "$staged" | grep -E '(^|/)(devdocs|armory|rsrc/papers|\.claude|\.idea|\.playwright-mcp)/|(^|/)\.env|\.log$|^exploit\.html$|^exfil2\.html$|^\.DS_Store$' | grep -v -E '(^|/)\.env\.example$' || true)"
+# 1) IP / secrets must never be staged. TWO precise exemptions:
+#      - ``.env.example`` — the tracked, secret-free template
+#      - ``tests/fixtures/armory/`` — the tracked SYNTHETIC fixture set
+#        (the real repo-root armory/ and every other armory/ stay blocked;
+#        same exemption as .gitignore)
+blocked="$(echo "$staged" | grep -E '(^|/)(devdocs|armory|rsrc/papers|\.claude|\.idea|\.playwright-mcp)/|(^|/)\.env|\.log$|^exploit\.html$|^exfil2\.html$|^\.DS_Store$' | grep -v -E '(^|/)\.env\.example$|^tests/fixtures/armory/' || true)"
 if [ -n "$blocked" ]; then
     echo "$blocked"
     fail "staged files above are internal research IP / credentials (guide §3 #11) — unstage them"
