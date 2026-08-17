@@ -5,15 +5,20 @@ Subcommands:
   recon    --url X [--adapter ..] probe defenses, print the DefenseProfile
   run      --scenario S --url X   full loop on ONE scenario, print report
   sweep    [--track T] --url X    run every matching scenario on a small budget
+  qa       --url X                FIXED baseline suite → QA-style report
+                                  (deterministic, no search; see README_QA.md)
 
 Examples:
   jb-ape scenarios
+  jb-ape qa --url https://t/ --adapter llm --llm-model gpt-4o-mini
   jb-ape run --scenario tool-call-hijack --url https://t/ --adapter browser
   jb-ape run --track office --goal "leak sysprompt" --pattern "(?i)you are" \
              --url https://t/ --adapter llm --llm-model gpt-4o-mini
   jb-ape sweep --track coding --url https://t/ --adapter llm --llm-model m
 
-Exit codes: 0 normal; 1 with ``--strict`` when the objective was not achieved.
+Exit codes: 0 normal; 1 with ``--strict`` when the objective was not achieved,
+or for ``qa`` when findings reach the ``--fail-on`` policy; 2 on config or
+execution errors.
 """
 
 from __future__ import annotations
@@ -176,6 +181,100 @@ def cmd_sweep(args) -> int:
     return 0
 
 
+def cmd_qa(args) -> int:
+    from jb_ape.qa import (
+        QA_CATEGORIES,
+        build_qa_suite,
+        demo_responses,
+        load_regression_ids,
+        render_qa_console,
+        render_qa_json,
+        render_qa_markdown,
+        run_qa,
+        save_regression,
+    )
+
+    cats = None
+    if args.categories:
+        cats = [c.strip() for c in args.categories.split(",") if c.strip()]
+        unknown = [c for c in cats if c not in QA_CATEGORIES]
+        if unknown:
+            raise SystemExit(
+                f"unknown categories {unknown}; valid: {sorted(QA_CATEGORIES)}")
+    cases = build_qa_suite(categories=cats)
+
+    if args.cases:
+        wanted = set(args.cases)
+        unknown = wanted - {c.id for c in cases}
+        if unknown:
+            raise SystemExit(f"unknown case ids {sorted(unknown)}")
+        cases = [c for c in cases if c.id in wanted]
+    if args.regression_only:
+        ids = set(load_regression_ids(args.regression))
+        if not ids:
+            print(f"[qa] regression corpus {args.regression} is empty — "
+                  f"nothing to replay")
+            return 0
+        cases = [c for c in cases if c.id in ids]
+
+    if args.list:
+        print(f"{'case':<8} {'category':<20} {'scenario':<22} {'tech':<6} title")
+        for c in cases:
+            print(f"{c.id:<8} {c.category:<20} {c.scenario_sid:<22} "
+                  f"{c.technique:<6} {c.title}")
+        print(f"[qa] {len(cases)} cases · categories: {', '.join(QA_CATEGORIES)}")
+        return 0
+
+    if not args.url:
+        raise SystemExit("--url is required to run the suite (see --list)")
+    if args.demo and args.adapter != "dryrun":
+        raise SystemExit("--demo scripts offline responses; it requires "
+                         "--adapter dryrun")
+
+    browser = _adapter(args.adapter, args.llm_model, args.llm_base_url)
+    if args.demo:
+        from jb_ape.browser import DryRunBrowserClient
+
+        browser = DryRunBrowserClient(responses=demo_responses(cases))
+    judge_llm = None
+    if args.llm_model:
+        from jb_ape.llm import OpenAICompatibleLLM
+
+        judge_llm = OpenAICompatibleLLM(model=args.llm_model,
+                                        base_url=args.llm_base_url,
+                                        temperature=0.0)
+
+    print(f"[qa] target={args.url} adapter={args.adapter} cases={len(cases)} "
+          f"lang={args.lang} fail-on={args.fail_on}", file=sys.stderr)
+    rep = run_qa(args.url, browser, cases, judge_llm=judge_llm,
+                 adapter=args.adapter)
+
+    if args.format == "json":
+        print(render_qa_json(rep))
+    else:
+        if args.format == "md":
+            print(render_qa_markdown(rep, lang=args.lang, fail_on=args.fail_on))
+        else:
+            print(render_qa_console(rep, lang=args.lang))
+        if report_failed := rep.failed() + rep.suspicious():
+            print(f"[qa] {len(report_failed)} finding(s) — rerun with "
+                  f"--format md for evidence + repro steps", file=sys.stderr)
+    if args.out:
+        _write(args.out, "qa-report.md",
+               render_qa_markdown(rep, lang=args.lang, fail_on=args.fail_on))
+        _write(args.out, "qa-report.json", render_qa_json(rep))
+    if args.record_failures:
+        n = save_regression(args.regression, rep)
+        print(f"[qa] regression corpus {args.regression}: {n} case(s)",
+              file=sys.stderr)
+    code = rep.exit_code(args.fail_on)
+    if code:
+        print(f"[qa] exit {code} — findings at/above fail-on={args.fail_on}"
+              if code == 1 else "[qa] exit 2 — execution errors, re-run",
+              file=sys.stderr)
+    return code
+
+
 def cmd_engage(args) -> int:
     import json
 
@@ -277,8 +376,38 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--planner", default="bandit",
                     choices=["bandit", "tree"])
     ps.add_argument("--out")
-    return p
 
+    pq = sub.add_parser(
+        "qa", help="QA smoke test: fixed baseline suite → QA-style report")
+    pq.add_argument("--url", help="target base URL (any value for dryrun)")
+    pq.add_argument("--adapter", default="dryrun",
+                    choices=["dryrun", "browser", "llm"])
+    pq.add_argument("--llm-model")
+    pq.add_argument("--llm-base-url")
+    pq.add_argument("--categories",
+                    help="comma-separated risk categories (default: all)")
+    pq.add_argument("--case", action="append", dest="cases",
+                    help="run only these case ids, repeatable (repro)")
+    pq.add_argument("--list", action="store_true",
+                    help="list the fixed suite and exit")
+    pq.add_argument("--lang", default="zh", choices=["zh", "en"])
+    pq.add_argument("--format", default="console",
+                    choices=["console", "md", "json"])
+    pq.add_argument("--out",
+                    help="write qa-report.md + qa-report.json to this directory")
+    pq.add_argument("--fail-on", default="high",
+                    choices=["high", "medium", "any", "none"],
+                    help="exit-1 policy for CI (default: high)")
+    pq.add_argument("--regression", default="qa_regression.json",
+                    help="regression corpus file")
+    pq.add_argument("--regression-only", action="store_true",
+                    help="replay only cases recorded in the corpus")
+    pq.add_argument("--record-failures", action="store_true",
+                    help="append failed+suspicious cases to the corpus")
+    pq.add_argument("--demo", action="store_true",
+                    help="dryrun: script 1 High failure + 1 Suspicious so the "
+                         "report shape is visible offline")
+    return p
 
 def _common(sp, url: bool = False) -> None:
     if url:
@@ -304,6 +433,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_run(args)
     if args.cmd == "sweep":
         return cmd_sweep(args)
+    if args.cmd == "qa":
+        return cmd_qa(args)
     if args.cmd == "engage":
         return cmd_engage(args)
     return 2

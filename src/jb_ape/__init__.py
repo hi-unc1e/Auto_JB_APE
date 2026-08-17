@@ -1,6 +1,6 @@
 """jb_ape — Automated LLM red-team payload wisdom engine.
 
-A competition red-team research framework for generating, mutating, and
+A red-team research framework for generating, mutating, and
 adjudicating prompt-injection / jailbreak payloads. See ``devdocs/`` for the
 full knowledge base.
 
@@ -26,6 +26,7 @@ from jb_ape.models import (
     Track,
     Variant,
 )
+from jb_ape.qa import QAReport, build_qa_suite, qa_smoke_test
 
 __all__ = [
     "BypassId",
@@ -34,12 +35,15 @@ __all__ = [
     "Feedback",
     "JudgeResult",
     "Objective",
+    "QAReport",
     "ScenarioId",
     "SubmissionResult",
     "TechniqueId",
     "Track",
     "Variant",
     "build_engine",
+    "build_qa_suite",
+    "qa_smoke_test",
     "quick_run",
     "__version__",
 ]
