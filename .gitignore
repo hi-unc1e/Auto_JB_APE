@@ -1,5 +1,5 @@
 # === 内部保密内容：严禁提交到任何远程仓库 ===
-# 比赛相关描述、playbook、研究笔记（核心 IP，必须本地保留）
+# 内部研究描述、playbook、研究笔记（核心 IP，必须本地保留）
 devdocs/
 devdocs/*
 devdocs/**
