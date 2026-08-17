@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path as _Path
 
 from jb_ape.hijack import (
     HijackGate,
@@ -16,6 +17,8 @@ from jb_ape.hijack import (
 )
 from jb_ape.judge import Judge
 from jb_ape.models import Objective, SubmissionResult, Track
+
+FIXTURE_ARMORY = str(_Path(__file__).resolve().parent / "fixtures" / "armory")
 
 
 class TestStripToActionable(unittest.TestCase):
@@ -224,7 +227,7 @@ class TestArmoryTriggers(unittest.TestCase):
 
     def test_trigger_for_returns_none_without_entry(self):
         from jb_ape.armory import Armory
-        a = Armory("armory")  # real armory has only commented template
+        a = Armory(FIXTURE_ARMORY)  # fixture armory ships no triggers
         self.assertIsNone(a.trigger_for("nonexistent-model"))
         self.assertIsNone(a.trigger_for(None))
 

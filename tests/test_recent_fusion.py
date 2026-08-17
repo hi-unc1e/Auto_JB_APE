@@ -11,12 +11,15 @@ Guards the newly fused artifacts:
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from jb_ape.armory import Armory
 from jb_ape.jailbreak import FailureMode, technique_failure_mode
 from jb_ape.models import Objective, Track
 from jb_ape.planner import Bandit, Planner
 from jb_ape.techniques import TECHNIQUES, render
+
+FIXTURE_ARMORY = str(Path(__file__).resolve().parent / "fixtures" / "armory")
 
 
 class TestNewTechniques(unittest.TestCase):
@@ -55,7 +58,7 @@ class TestNewTechniques(unittest.TestCase):
 
 class TestNewSeeds(unittest.TestCase):
     def setUp(self):
-        self.armory = Armory("armory")
+        self.armory = Armory(FIXTURE_ARMORY)
 
     def test_coding_seeds(self):
         ids = {s.sid for s in self.armory.load_seeds(Track.CODING)}
@@ -91,14 +94,14 @@ class TestNewSeeds(unittest.TestCase):
 
 class TestNewPriors(unittest.TestCase):
     def test_f_family_priors_wired(self):
-        armory = Armory("armory")
+        armory = Armory(FIXTURE_ARMORY)
         for tid in ("T-F1", "T-F2", "T-F3", "T-F4"):
             a, b = armory.load_priors(Track.CODING)[tid]
             self.assertGreater(a, 1.0)
             self.assertGreater(b, 1.0)
 
     def test_coding_boost_over_default(self):
-        armory = Armory("armory")
+        armory = Armory(FIXTURE_ARMORY)
         d = armory.load_priors(None)["T-F1"]
         c = armory.load_priors(Track.CODING)["T-F1"]
         self.assertGreater(c[0], d[0])  # coding track boosted per 2607.03968
@@ -113,7 +116,7 @@ class TestPriorsYamlHygiene(unittest.TestCase):
     (this exact bug wiped the original priors when appending F-family)."""
 
     def test_single_top_level_section_per_key(self):
-        with open("armory/priors/technique_priors.yml") as fh:
+        with open(Path(FIXTURE_ARMORY) / "priors" / "technique_priors.yml") as fh:
             text = fh.read()
         for section in ("default", "office", "ecommerce", "coding"):
             n = sum(1 for ln in text.splitlines()
@@ -122,7 +125,7 @@ class TestPriorsYamlHygiene(unittest.TestCase):
 
     def test_sentinel_survives_merge(self):
         """Old entries must never be wiped by new appends."""
-        armory = Armory("armory")
+        armory = Armory(FIXTURE_ARMORY)
         office = armory.load_priors("office")
         self.assertIn("EMI-01", office)
         default = armory.load_priors(None)

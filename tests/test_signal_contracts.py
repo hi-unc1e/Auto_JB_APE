@@ -39,6 +39,7 @@ Signal inventory covered (producer → consumer):
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from jb_ape.armory import Armory
 from jb_ape.browser import DryRunBrowserClient
@@ -59,6 +60,8 @@ from jb_ape.models import (
 )
 from jb_ape.planner import Bandit, Planner
 from jb_ape.rewriter import Rewriter
+
+FIXTURE_ARMORY = str(Path(__file__).resolve().parent / "fixtures" / "armory")
 
 
 def _make_gen(obj, browser, **cfg):
@@ -150,7 +153,7 @@ class C5ArmoryPriorsToSelection(unittest.TestCase):
     """Priors must bias SELECTION, not just drift the posterior."""
 
     def test_contract(self):
-        armory = Armory("armory")
+        armory = Armory(FIXTURE_ARMORY)
         priors = armory.load_priors(Track.CODING)
         strong = max(priors, key=lambda k: priors[k][0] / sum(priors[k]))
 
@@ -282,7 +285,7 @@ class C11GateLLMToFrontierPruning(unittest.TestCase):
 class C12ArmoryChainsToRoundZeroSeeds(unittest.TestCase):
     def test_contract(self):
         obj = Objective(track=Track.OFFICE, goal="x")
-        armory = Armory("armory")
+        armory = Armory(FIXTURE_ARMORY)
         chains = armory.load_chains(Track.OFFICE)
         self.assertGreater(len(chains), 0)  # fixture exists
 

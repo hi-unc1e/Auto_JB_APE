@@ -11,6 +11,7 @@ Guards the specific regressions the reviewers caught:
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from jb_ape.armory import Armory
 from jb_ape.generator import RunRecord, _arm_id, _feedback_for
@@ -23,6 +24,8 @@ from jb_ape.models import (
     Variant,
 )
 from jb_ape.planner import TreeNode
+
+FIXTURE_ARMORY = str(Path(__file__).resolve().parent / "fixtures" / "armory")
 
 
 class TestBanditArmAlignment(unittest.TestCase):
@@ -90,7 +93,7 @@ class TestSeedPlaceholdersFilled(unittest.TestCase):
     """P1-3: shipped seeds must not contain literal {callback} etc."""
 
     def setUp(self):
-        self.armory = Armory("armory")
+        self.armory = Armory(FIXTURE_ARMORY)
 
     def test_no_residual_placeholders_after_render(self):
         for track in Track:

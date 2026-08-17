@@ -1,7 +1,8 @@
 """Tests for the armory persistence layer (armory/README.md).
 
-Uses the real ``armory/`` fixtures shipped with the repo (seeds/priors/chains)
-so the test doubles as a fixture-validity check. The run-log writer is tested
+Uses the tracked synthetic fixtures in ``tests/fixtures/armory/`` (the real
+``armory/`` is gitignored research IP) so the suite is hermetic on a fresh
+clone while still doubling as a fixture-validity check. The run-log writer is tested
 against a temp dir so it doesn't pollute the real runs/ log.
 """
 
@@ -15,10 +16,12 @@ from pathlib import Path
 from jb_ape.armory import Armory, EffectiveChain, SeedEntry
 from jb_ape.models import Track, Variant
 
+FIXTURE_ARMORY = str(Path(__file__).resolve().parent / "fixtures" / "armory")
+
 
 class TestArmorySeeds(unittest.TestCase):
     def setUp(self):
-        self.armory = Armory("armory")
+        self.armory = Armory(FIXTURE_ARMORY)
 
     def test_loads_office_seeds(self):
         seeds = self.armory.load_seeds(Track.OFFICE)
@@ -43,8 +46,8 @@ class TestArmorySeeds(unittest.TestCase):
 
     def test_all_seeds_when_no_track(self):
         seeds = self.armory.load_seeds(None)
-        # Should include seeds from every track file.
-        self.assertGreater(len(seeds), 30)
+        # Should include seeds from every track file (16 fixture seeds).
+        self.assertGreater(len(seeds), 10)
 
     def test_seed_to_variant_substitutes_goal(self):
         seeds = self.armory.load_seeds(Track.CODING)
@@ -63,7 +66,7 @@ class TestArmorySeeds(unittest.TestCase):
 
 class TestArmoryPriors(unittest.TestCase):
     def setUp(self):
-        self.armory = Armory("armory")
+        self.armory = Armory(FIXTURE_ARMORY)
 
     def test_default_priors_loaded(self):
         priors = self.armory.load_priors(Track.OFFICE)
@@ -87,7 +90,7 @@ class TestArmoryPriors(unittest.TestCase):
 
 class TestArmoryChains(unittest.TestCase):
     def setUp(self):
-        self.armory = Armory("armory")
+        self.armory = Armory(FIXTURE_ARMORY)
 
     def test_office_chains_present(self):
         chains = self.armory.load_chains(Track.OFFICE)
@@ -168,7 +171,7 @@ class TestPlannerWithArmory(unittest.TestCase):
 
         obj = Objective(track=Track.CODING, goal="get flag")
         bandit = Bandit()
-        armory = Armory("armory")
+        armory = Armory(FIXTURE_ARMORY)
         planner = Planner(objective=obj, bandit=bandit, armory=armory)
         seeds = planner.plan_round(0, max_rounds=10, bundle_size=3)
         self.assertGreater(len(seeds), 0)
@@ -183,7 +186,7 @@ class TestPlannerWithArmory(unittest.TestCase):
 
         obj = Objective(track=Track.OFFICE, goal="x")
         bandit = Bandit()
-        armory = Armory("armory")
+        armory = Armory(FIXTURE_ARMORY)
         planner = Planner(objective=obj, bandit=bandit, armory=armory)
         # Before planning, priors are at default (1.0, 1.0).
         a0 = bandit.arm(Track.OFFICE, "T-A1").alpha
