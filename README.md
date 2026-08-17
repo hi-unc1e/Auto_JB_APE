@@ -1,12 +1,12 @@
 # jb_ape — Agent Red-Team Engine with Machine-Verified Verdicts
 
 [![python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)]()
-[![tests](https://img.shields.io/badge/tests-334%20passing-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-360%20passing-brightgreen)]()
 [![lint](https://img.shields.io/badge/ruff-clean-success)]()
 [![license](https://img.shields.io/badge/license-MIT-informational)]()
 [![authorized use only](https://img.shields.io/badge/use-authorized%20targets%20only-e5484d)]()
 
-**[中文文档](README_cn.md)**
+**[中文文档](README_cn.md)** · **[QA 冒烟测试指南 / QA quick path](README_QA.md)**
 
 jb_ape is an automated red-team engine for LLM agents. You give it an objective and
 a target; it probes the target's defenses, generates and mutates attack payloads,
@@ -14,9 +14,19 @@ drives the target through a browser or API adapter, **adjudicates every attempt
 with its own three-tier judge**, and keeps learning across attempts under a strict
 submission budget.
 
-> ⚠️ **Authorized security research only.** Built for a sanctioned jailbreak
-> competition and CTF-style testing. Never point it at systems you don't own or
+> ⚠️ **Authorized security research only.** Built for sanctioned red-team
+> engagements and CTF-style testing. Never point it at systems you don't own or
 > aren't contracted to test.
+
+**QA / shift-left fast path** — not a red-teamer? `jb-ape qa` runs a fixed
+24-case baseline suite (prompt injection, indirect injection, sensitive-data
+leakage, tool misuse, excessive agency, unauthorized data access) and reports
+in QA vocabulary — pass/suspicious/failed + severity + evidence + repro, with
+CI exit codes and a regression corpus. See **[README_QA.md](README_QA.md)**:
+
+```bash
+jb-ape qa --url https://t/ --adapter llm --llm-model m   # 24 fixed cases → QA report
+```
 
 ---
 
@@ -141,6 +151,9 @@ jb-ape scenarios                     # 12 preset scenarios, 9 problem classes
 # offline mechanics check (no target, no network):
 jb-ape run --scenario data-exfil --url https://example/ --adapter dryrun
 
+# QA smoke test (fixed suite, offline demo of the report shape):
+jb-ape qa --url https://demo/ --adapter dryrun --demo
+
 # against a real OpenAI-compatible target:
 export OPENAI_API_KEY=... OPENAI_BASE_URL=...
 pip install openai pyyaml            # optional adapters
@@ -233,13 +246,13 @@ rewarding arms it never sampled; a recon profile nobody read). The cure is now a
 rule: **a signal with no observable consumer is dead code, no matter how well its
 producer is unit-tested.** Every capability must name its producer, its consumer,
 and pass a with/without contract test in `tests/test_signal_contracts.py` —
-currently **15 signal contracts** covering recon→planner, PPL→rewriter,
-verdict→tree, and more, inside a **334-test** offline suite (no network, no LLM,
-no browser).
+currently **16 signal contracts** covering recon→planner, PPL→rewriter,
+verdict→tree, verdict→QA-report, and more, inside a **360-test** offline suite
+(no network, no LLM, no browser).
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 334 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 360 tests
 git config core.hooksPath hooks                               # enable the commit gate
 ```
 
@@ -259,7 +272,8 @@ real suite.
 src/jb_ape/        the engine — models · facade · generator · planner · dtree
                    judge · rewriter · recon · defense · jailbreak · catalog
                    engagement · mcp_server · cli · targets · browser · armory
-tests/             334 offline tests, incl. 15 signal-contract tests
+                   qa (QA smoke suite) · report
+tests/             360 offline tests, incl. 16 signal-contract tests
 hooks/             pre-commit gate: IP-scan · ruff · full suite
 skills/jb-ape/     host Skill for agent integrators
 armory/            persisted signals: seeds · priors · chains · run logs (gitignored)

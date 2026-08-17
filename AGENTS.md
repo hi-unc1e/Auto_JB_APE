@@ -10,16 +10,23 @@
 
 ## What this is
 
-`jb_ape` is an automated LLM red-team payload-generation engine for an
-authorized jailbreak competition (3 tracks: `office`, `ecommerce`, `coding`).
-It is black-box (drives a browser), budget-aware (60 submissions/day), and
-learns across attempts via a bandit + tree search.
+`jb_ape` is an automated LLM red-team payload-generation engine for
+authorized agent red-team engagements (scenario domains: `office`,
+`ecommerce`, `coding`). It is black-box (drives a browser), budget-aware
+(configurable submission budget), and learns across attempts via a bandit +
+tree search.
 
 This is security research tooling. Use only against authorized targets.
+
+**QA quick path**: if you are a QA engineer (not a red-teamer), you want the
+smoke test, not the search loop — `jb-ape qa` runs a fixed 24-case baseline
+suite and reports in QA vocabulary (pass/suspicious/failed + severity +
+evidence + repro). See `README_QA.md`.
 
 ## The CLI (preferred for humans; the 4-line API below for agents)
 
 ```bash
+jb-ape qa --url https://t/ --adapter llm --llm-model m   # QA smoke (fixed suite)
 jb-ape scenarios                                    # 12 preset problem scenarios
 jb-ape recon --url https://t/ --adapter browser     # probe defenses first
 jb-ape run --scenario tool-call-hijack --url https://t/ --adapter llm \
@@ -89,7 +96,7 @@ Before any capability counts as done, answer in the PR/commit:
 1. **Producer** — where is the signal born? (e.g. `recon` sets `ppl_filter_active`)
 2. **Consumer** — what behavior reads it? (e.g. `rewriter` drops `B-I2`)
 3. **Contract test** — a with/without test proving the behavior DIFFERS:
-   `tests/test_signal_contracts.py` is the pattern (14 contracts, one per
+   `tests/test_signal_contracts.py` is the pattern (16 contracts, one per
    signal). Copy the shape: `without = f(x)`, `with_ = f(x, signal)`,
    `assertNotEqual` in the expected direction.
 
@@ -112,6 +119,7 @@ The current signal inventory (keep in sync when adding one):
 | 13 | success_patterns | objective → machine-check S-level |
 | 14 | confirm_on_success | config → confirm call only, never the verdict |
 | 15 | tree verdicts | judge → TreeWalker.record (solved/prune/Wei route) |
+| 16 | qa verdict mapping | judge → QA smoke verdict/severity/exit code |
 
 ## What an agent should and should NOT do
 
@@ -129,11 +137,12 @@ The current signal inventory (keep in sync when adding one):
 - Read `devdocs/` (75K words of design notes; redundant with the code, and
   may be stale). If you need *why* something works, read the module docstring.
 - Edit `src/jb_ape/` prompts without running `ruff check src/ tests/` and
-  `python -m unittest discover -s tests` (334 tests guard the invariants).
+  `python -m unittest discover -s tests` (360 tests guard the invariants).
 - Commit with `--no-verify` — the pre-commit gate (IP scan · ruff · suite) is
   the enforcement of README_BEFORE_CONTRIBUTING §0; bypass only in emergencies
   and re-run the full gates afterwards.
-- Push `devdocs/` or `armory/` to git — both are gitignored (competition IP).
+- Push `devdocs/` or `armory/` to git — both are gitignored (internal
+  research IP).
 
 ## How to wire a real browser
 
@@ -174,7 +183,7 @@ Key invariants the tests enforce (don't break these):
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 334 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 360 tests
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # strict
 ```
 
@@ -190,6 +199,7 @@ inventory, baseline count).
 | Want to understand | Read |
 |---|---|
 | What "winning" means | `models.py` (`Objective`, `JudgeResult.can_submit`) |
+| The QA smoke suite | `qa.py` (`build_qa_suite`, `run_qa`, `render_qa_markdown`) |
 | The main loop | `generator.py` `Generator.run()` |
 | How payloads mutate | `rewriter.py`, `defense.py`, `jailbreak.py` |
 | How success is judged | `judge.py`, `hijack.py`, `decode.py` |
