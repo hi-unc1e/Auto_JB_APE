@@ -1,0 +1,53 @@
+# === 内部保密内容：严禁提交到任何远程仓库 ===
+# 内部研究描述、playbook、研究笔记（核心 IP，必须本地保留）
+devdocs/
+devdocs/*
+devdocs/**
+
+# Armory：持久化的红队信号库（含 payload、findings、run 日志）
+armory/
+armory/**
+# 例外：测试套件使用的合成固定装置（结构同构、内容为合成样本，可入库）
+!tests/fixtures/armory/**
+!tests/fixtures/armory/
+
+# 敏感凭据与本地环境
+.env
+.env.*
+!.env.example
+
+# 攻击/取证产物（含 flag、cookie、外泄数据）
+http.log
+*.log
+exploit.html
+exfil2.html
+.playwright-mcp/
+# legacy/ctf 题解含 HTB flag —— 本地保留，不推送
+legacy/ctf/
+
+# 论文参考库（~46MB 二进制，本地保留；索引见 devdocs/15 来源清单）
+rsrc/papers/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+.test-tmp/
+jb-ape-out/
+
+# uv
+# uv.lock  # 取消注释以忽略 lockfile
+
+# 编辑器 / 系统
+.claude/*
+.claude
+.idea/
+.idea/*
+.DS_Store
+*.swp

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>jb-ape Session Bridge 设置</title>
+  <style>
+    body { font: 14px/1.6 -apple-system, sans-serif; margin: 24px auto; max-width: 640px; }
+    textarea { width: 100%; height: 220px; font: 12px/1.5 ui-monospace, monospace; }
+    .hint { color: #666; font-size: 12px; }
+    button { margin-top: 8px; padding: 6px 16px; }
+  </style>
+</head>
+<body>
+  <h3>站点选择器配置（可选）</h3>
+  <p class="hint">
+    大多数聊天页面能自动找到输入框和回复区。如果自动识别失败，按域名填写选择器（CSS selector）。
+    <code>*</code> 作为键表示对所有站点生效。留空则全部使用自动识别。
+  </p>
+  <textarea id="cfg">{
+  "*": {},
+  "chat.example.com": {
+    "inputSelector": "textarea#prompt",
+    "sendSelector": "button[aria-label='Send']",
+    "replySelector": "[data-role='assistant']"
+  }
+}</textarea>
+  <br />
+  <button id="save">保存</button>
+  <span id="status" class="hint"></span>
+  <script>
+    const el = document.getElementById("cfg");
+    chrome.storage.local.get("jbApeSites").then(({ jbApeSites }) => {
+      if (jbApeSites) el.value = JSON.stringify(jbApeSites, null, 2);
+    });
+    document.getElementById("save").onclick = async () => {
+      try {
+        const cfg = JSON.parse(el.value);
+        await chrome.storage.local.set({ jbApeSites: cfg });
+        document.getElementById("status").textContent = "已保存 ✓";
+      } catch (e) {
+        document.getElementById("status").textContent = "JSON 无效: " + e;
+      }
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "jb-ape Session Bridge",
+  "version": "1.0.0",
+  "description": "Runs jb-ape agent-security test cases inside YOUR logged-in browser session. Local loopback only — no data leaves your machine.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["inject.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle" }
+  ],
+  "options_page": "options.html"
+}
