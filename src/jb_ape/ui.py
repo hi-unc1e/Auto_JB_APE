@@ -4,8 +4,18 @@
 dependencies, nothing leaves the machine) and serves a single-page GUI that
 walks the QA journey end to end:
 
-    配置（目标/对接方式/风险类别） → 执行（逐条实时进度，可停止）
+    配置（目标/对接方式/参数/范围 + 连接自检 + 用例预览）
+    → 执行（逐条实时进度，可停止）
     → 报告（一页放行结论、白话发现、一键复制提单模板、下载 md/json）
+
+Transparency rules (learned the hard way — "盲盒" feedback):
+  * every adapter can be PROBED before a run (``/api/check``): dryrun needs
+    nothing, llm gets a real ping round-trip with latency, ext waits for the
+    extension heartbeat on the bridge;
+  * the exact case list AND payloads are previewable before starting
+    (``/api/suites``), filtered live by the selected risk categories;
+  * the environment is visible (``/api/env``): whether OPENAI_API_KEY /
+    OPENAI_BASE_URL are set — booleans and host only, never values.
 
 The GUI is a thin view over the SAME engine the CLI uses (`build_qa_suite` +
 `run_qa` + the QA-first renderers) — no separate logic to drift. The run
@@ -14,7 +24,9 @@ per-case streaming (via `run_qa(on_result=...)`).
 
 API (JSON, loopback only):
   GET  /                       the page
-  GET  /api/suites             the fixed case list (id/category/title/…)
+  GET  /api/suites             the fixed case list incl. payloads (preview)
+  GET  /api/env                which env vars are visible to the engine
+  POST /api/check              connectivity probe for the chosen adapter
   POST /api/run                {url, adapter, llm_model?, …} → starts a run
   GET  /api/status             live progress + per-case verdicts + advice
   POST /api/stop               request an early stop (partial report)
@@ -25,6 +37,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import threading
 import time
 import webbrowser
@@ -106,6 +119,89 @@ class UIRun:
                               if self.report else None),
                 "error": self.error,
             }
+
+
+def check_adapter(opts: dict) -> dict:
+    """Lightweight connectivity probe for the chosen adapter — the GUI's
+    "验证配置" button. Never runs a case; returns {ok, detail}."""
+    adapter = opts.get("adapter", "dryrun")
+    if adapter == "dryrun":
+        return {"ok": True,
+                "detail": "离线演示模式：无需连接目标，可直接开始"
+                          "（可勾选「演示失败样例」先看报告形态）"}
+    if adapter == "llm":
+        model = (opts.get("llm_model") or "").strip()
+        if not model:
+            return {"ok": False, "detail": "缺少模型名 —— API 直连方式必填"}
+        try:
+            from jb_ape.targets import LLMTargetClient
+
+            client = LLMTargetClient(model=model,
+                                     base_url=opts.get("llm_base_url") or None)
+            t0 = time.time()
+            client.open(opts.get("url") or "https://target/")
+            sub = client.submit_payload(
+                "Connectivity check. Reply with the single word: pong")
+            latency = round((time.time() - t0) * 1000)
+            if sub.error:
+                return {"ok": False, "detail": f"目标返回错误：{sub.error}"}
+            reply = ""
+            for resp in sub.api_responses:
+                reply += str(resp.get("content", ""))
+            reply = reply.strip().replace("\n", " ")[:80]
+            return {"ok": True,
+                    "detail": f"对接成功 · 往返 {latency}ms · 目标回复：「{reply or '(空)'}」"}
+        except ImportError as exc:
+            return {"ok": False,
+                    "detail": f"缺少依赖：{exc} —— 在启动 jb-ape ui 的环境里 "
+                              f"pip install openai 后重启"}
+        except Exception as exc:  # noqa: BLE001 — probe must never crash the UI
+            return {"ok": False,
+                    "detail": f"连接失败：{type(exc).__name__}: {exc}"}
+    if adapter == "ext":
+        client = None
+        try:
+            from jb_ape.bridge import ExtensionBrowserClient
+
+            client = ExtensionBrowserClient(
+                port=int(opts.get("ext_port") or 8765),
+                case_timeout=5, open_timeout=5)
+            wait = float(opts.get("ext_wait") or 8)
+            if client.wait_for_extension(timeout=wait):
+                return {"ok": True,
+                        "detail": f"插件已接入（{client.bridge.url} 心跳正常）· "
+                                  f"请确认目标页已登录并保持在前台"}
+            return {"ok": False,
+                    "detail": f"未检测到插件心跳（等待 {wait:.0f}s）—— 确认 "
+                              f"browser_ext/ 已加载启用、扩展未被浏览器休眠、"
+                              f"端口 {client.bridge.port} 未被占用"}
+        except OSError as exc:
+            return {"ok": False,
+                    "detail": f"本地桥启动失败（端口被占用？）：{exc}"}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False,
+                    "detail": f"检测失败：{type(exc).__name__}: {exc}"}
+        finally:
+            if client is not None:
+                with contextlib.suppress(OSError):
+                    client.stop()
+    return {"ok": False, "detail": f"未知对接方式: {adapter}"}
+
+
+def _env_payload() -> dict:
+    """Booleans + host only — env VALUES (keys) must never reach the page."""
+    base = os.environ.get("OPENAI_BASE_URL", "")
+    host = ""
+    if base:
+        with contextlib.suppress(ValueError):
+            from urllib.parse import urlparse
+
+            host = urlparse(base).netloc
+    return {
+        "openai_key_set": bool(os.environ.get("OPENAI_API_KEY")),
+        "openai_base_url_set": bool(base),
+        "openai_base_url_host": host,
+    }
 
 
 def _execute(run: UIRun, opts: dict) -> None:
@@ -191,6 +287,13 @@ class UIServer:
     def __init__(self, port: int = DEFAULT_PORT, host: str = "127.0.0.1") -> None:
         self.run = UIRun()
         self._worker: threading.Thread | None = None
+        # One stable suite listing per server start (fresh canary per start).
+        self._suites = [{
+            "id": c.id, "category": c.category,
+            "category_label_zh": CATEGORY_LABELS["zh"][c.category],
+            "scenario": c.scenario_sid, "technique": c.technique,
+            "title": c.title, "payload": c.payload,
+        } for c in build_qa_suite()]
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -198,22 +301,25 @@ class UIServer:
                 body = (obj if isinstance(obj, bytes) else
                         json.dumps(obj, ensure_ascii=False).encode("utf-8"))
                 self.send_response(code)
-                self.send_header("Content-Type",
-                                 f"{ctype}; charset=utf-8")
+                self.send_header("Content-Type", f"{ctype}; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+
+            def _body(self) -> dict:
+                try:
+                    length = int(self.headers.get("Content-Length", 0))
+                    return json.loads(self.rfile.read(length).decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    return {}
 
             def do_GET(self):  # noqa: N802 — http.server API
                 if self.path in ("/", "/index.html"):
                     self._json(200, PAGE.encode("utf-8"), "text/html")
                 elif self.path.startswith("/api/suites"):
-                    self._json(200, [{
-                        "id": c.id, "category": c.category,
-                        "category_label_zh": CATEGORY_LABELS["zh"][c.category],
-                        "scenario": c.scenario_sid, "technique": c.technique,
-                        "title": c.title,
-                    } for c in build_qa_suite()])
+                    self._json(200, server._suites)
+                elif self.path.startswith("/api/env"):
+                    self._json(200, _env_payload())
                 elif self.path.startswith("/api/status"):
                     self._json(200, server.run.snapshot())
                 elif self.path.startswith("/api/report"):
@@ -239,16 +345,21 @@ class UIServer:
                     server.run.stop_flag.set()
                     self._json(200, {"ok": True})
                     return
+                if self.path == "/api/check":
+                    busy = server._worker is not None and server._worker.is_alive()
+                    if busy:
+                        self._json(409, {"error": "已有运行在进行中，请等它结束再自检"})
+                        return
+                    self._json(200, check_adapter(self._body()))
+                    return
                 if self.path != "/api/run":
                     self._json(404, {"error": "not found"})
                     return
                 if server._worker is not None and server._worker.is_alive():
                     self._json(409, {"error": "已有运行在进行中"})
                     return
-                try:
-                    length = int(self.headers.get("Content-Length", 0))
-                    opts = json.loads(self.rfile.read(length).decode("utf-8"))
-                except (ValueError, UnicodeDecodeError):
+                opts = self._body()
+                if not opts:
                     self._json(400, {"error": "请求体不是合法 JSON"})
                     return
                 server.run = UIRun()
@@ -330,7 +441,7 @@ PAGE = """<!DOCTYPE html>
   * { box-sizing:border-box; }
   body { font:15px/1.65 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
          background:var(--bg); color:var(--ink); margin:0; }
-  .wrap { max-width:880px; margin:0 auto; padding:28px 16px 80px; }
+  .wrap { max-width:920px; margin:0 auto; padding:28px 16px 80px; }
   h1 { font-size:22px; margin:0 0 4px; }
   .sub { color:var(--mut); font-size:13px; margin-bottom:20px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
@@ -338,25 +449,46 @@ PAGE = """<!DOCTYPE html>
   .card h2 { font-size:15px; margin:0 0 12px; display:flex; align-items:center; gap:8px; }
   .step { display:inline-flex; width:22px; height:22px; border-radius:50%;
           background:var(--brand); color:#fff; font-size:12px; align-items:center;
-          justify-content:center; }
+          justify-content:center; flex:none; }
+  .sect { margin-top:18px; }
+  .sect > .stitle { font-size:13px; font-weight:600; color:var(--mut);
+                    margin-bottom:8px; }
   label { display:block; font-size:13px; color:var(--mut); margin:10px 0 4px; }
+  label.full { color:var(--ink); display:flex; gap:6px; align-items:center; }
   input[type=text], select { width:100%; padding:8px 10px; border:1px solid var(--line);
-          border-radius:8px; font-size:14px; }
-  .radios { display:flex; gap:16px; flex-wrap:wrap; margin-top:6px; }
-  .radios label { display:flex; gap:6px; align-items:center; color:var(--ink);
-                  font-size:14px; margin:0; cursor:pointer; }
+          border-radius:8px; font-size:14px; background:#fff; }
+  input.bad { border-color:var(--bad); }
+  .fielderr { color:var(--bad); font-size:12px; margin-top:3px; display:none; }
+  .acards { display:flex; gap:10px; flex-wrap:wrap; }
+  .acard { flex:1; min-width:200px; border:1px solid var(--line); border-radius:10px;
+           padding:10px 12px; cursor:pointer; }
+  .acard input { margin-right:6px; }
+  .acard b { font-size:14px; }
+  .acard .d { font-size:12px; color:var(--mut); margin-top:2px; }
+  .acard.sel { border-color:var(--brand); background:#f0f5ff; }
   .hint { font-size:12px; color:var(--mut); margin-top:4px; }
+  .envline { font-size:12px; margin-top:8px; color:var(--mut); }
+  .envline b.ok { color:var(--ok); } .envline b.no { color:var(--bad); }
   .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
   .chip { border:1px solid var(--line); border-radius:999px; padding:4px 12px;
           font-size:13px; cursor:pointer; user-select:none; background:#fff; }
   .chip.on { background:#e8effd; border-color:var(--brand); color:var(--brand); }
+  .count-line { font-size:13px; color:var(--mut); margin-top:8px; }
   .row { display:flex; gap:12px; flex-wrap:wrap; }
   .row > div { flex:1; min-width:180px; }
   button.primary { background:var(--brand); color:#fff; border:none; border-radius:8px;
-          padding:10px 22px; font-size:15px; cursor:pointer; margin-top:14px; }
+          padding:10px 26px; font-size:15px; cursor:pointer; }
   button.ghost { background:#fff; color:var(--ink); border:1px solid var(--line);
-          border-radius:8px; padding:7px 14px; font-size:13px; cursor:pointer; margin-top:14px; }
+          border-radius:8px; padding:9px 18px; font-size:14px; cursor:pointer; }
   button:disabled { opacity:.5; cursor:not-allowed; }
+  .actions { display:flex; gap:12px; align-items:center; margin-top:18px; flex-wrap:wrap; }
+  #checkmsg { font-size:13px; border-radius:8px; padding:8px 12px; display:none;
+              flex:1; min-width:260px; }
+  #checkmsg.ok { display:block; background:#e7f6ec; color:#166534; }
+  #checkmsg.no { display:block; background:#fde8e8; color:#991b1b; }
+  #jsmsg { display:none; background:#fff7ed; border:1px solid #fed7aa; color:#9a3412;
+           border-radius:8px; padding:8px 12px; font-size:12px; margin-bottom:12px;
+           font-family:ui-monospace,monospace; }
   .bar { height:8px; background:#eef0f3; border-radius:6px; overflow:hidden; margin:10px 0 6px; }
   .bar > i { display:block; height:100%; background:var(--brand); width:0;
              transition:width .3s; }
@@ -365,7 +497,7 @@ PAGE = """<!DOCTYPE html>
           border-bottom:1px dashed var(--line); font-size:13px; }
   .case .id { font-family:ui-monospace,monospace; color:var(--mut); width:64px; }
   .case .cat { color:var(--mut); }
-  .badge { margin-left:auto; font-size:12px; border-radius:6px; padding:1px 8px; }
+  .badge { margin-left:auto; font-size:12px; border-radius:6px; padding:1px 8px; flex:none; }
   .b-pass{background:#e7f6ec;color:var(--ok);} .b-fail{background:#fde8e8;color:var(--bad);}
   .b-susp{background:#fdf4dd;color:var(--susp);} .b-error{background:#eef0f3;color:var(--err);}
   .banner { border-radius:10px; padding:12px 16px; font-size:15px; margin-bottom:12px; }
@@ -391,62 +523,97 @@ PAGE = """<!DOCTYPE html>
   .okline { color:var(--ok); }
   #report, #runcard { display:none; }
   .copybtn { font-size:12px; padding:2px 10px; margin-left:8px; }
+  details.preview { margin-top:8px; }
+  details.preview summary { cursor:pointer; font-size:13px; color:var(--mut); }
+  .pv { margin-top:8px; max-height:420px; overflow:auto; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>🛡️ Agent 安全冒烟测试</h1>
-  <div class="sub">24 条固定基线用例 · 报告按 QA 视角输出 · 仅在本机运行，不外发任何数据</div>
+  <div class="sub" id="subtitle">固定基线用例 · 报告按 QA 视角输出 · 仅本机运行，不外发任何数据</div>
+  <div id="jsmsg"></div>
 
   <div class="card" id="cfgcard">
     <h2><span class="step">1</span> 配置</h2>
-    <label>目标地址</label>
-    <input type="text" id="url" placeholder="https://你的-agent-页面/" value="https://demo/">
-    <label>对接方式</label>
-    <div class="radios">
-      <label><input type="radio" name="adapter" value="dryrun" checked> 演示（离线）</label>
-      <label><input type="radio" name="adapter" value="llm"> API 直连</label>
-      <label><input type="radio" name="adapter" value="ext"> 浏览器插件（登录态）</label>
+
+    <div class="sect">
+      <div class="stitle">目标地址</div>
+      <input type="text" id="url" placeholder="https://你的-agent-页面/" value="https://demo/">
+      <div class="fielderr" id="url-err">请填写目标地址</div>
     </div>
-    <div id="llm-fields" style="display:none">
-      <div class="row">
-        <div><label>模型名（必填）</label><input type="text" id="llm_model" placeholder="例如 gpt-4o-mini / 内部模型名"></div>
-        <div><label>Base URL（可选，默认走 OPENAI_BASE_URL）</label><input type="text" id="llm_base_url" placeholder="https://网关/v1"></div>
+
+    <div class="sect">
+      <div class="stitle">对接方式</div>
+      <div class="acards">
+        <label class="acard sel"><input type="radio" name="adapter" value="dryrun" checked>
+          <b>演示（离线）</b><div class="d">不需要目标；可脚本化失败样例，先看报告形态</div></label>
+        <label class="acard"><input type="radio" name="adapter" value="llm">
+          <b>API 直连</b><div class="d">Agent 提供 OpenAI 兼容接口；需要模型名</div></label>
+        <label class="acard"><input type="radio" name="adapter" value="ext">
+          <b>浏览器插件（登录态）</b><div class="d">装一次 browser_ext/ 插件，复用你已登录的会话</div></label>
+      </div>
+
+      <div id="llm-fields" style="display:none">
+        <div class="row">
+          <div><label>模型名（必填）</label>
+            <input type="text" id="llm_model" placeholder="例如 gpt-4o-mini / 内部模型名">
+            <div class="fielderr" id="model-err">API 直连需要模型名</div></div>
+          <div><label>Base URL（可选）</label>
+            <input type="text" id="llm_base_url" placeholder="https://网关/v1">
+            <div class="hint">留空时使用下方检测到的环境变量</div></div>
+        </div>
+        <div class="envline" id="envline">正在检测运行环境…</div>
+      </div>
+
+      <div id="ext-fields" style="display:none">
+        <div class="hint">需先在浏览器加载 <b>browser_ext/</b> 扩展并登录目标页（一次性，
+          见 browser_ext/README.md）。运行期间保持目标标签页在前台。</div>
+        <div class="row">
+          <div><label>桥端口</label><input type="text" id="ext_port" value="8765"></div>
+          <div><label>单条超时（秒）</label><input type="text" id="ext_timeout" value="240"></div>
+          <div><label>等待接入（秒）</label><input type="text" id="ext_wait" value="90"></div>
+        </div>
+      </div>
+
+      <div id="demo-row">
+        <label class="full" style="margin-top:12px">
+          <input type="checkbox" id="demo"> 演示模式：脚本化 1 个高危失败 + 1 个可疑（先看报告形态）
+        </label>
       </div>
     </div>
-    <div id="ext-fields" style="display:none">
-      <div class="hint">需要先在浏览器装好 <b>browser_ext/</b> 插件并登录目标页（一次性，见
-        browser_ext/README.md）。运行期间保持目标标签页在前台。</div>
+
+    <div class="sect">
+      <div class="stitle">测试范围</div>
+      <div class="chips" id="cats"></div>
+      <div class="count-line" id="catline"></div>
+      <details class="preview"><summary>预览将执行的用例与 payload（透明起见，点开看）</summary>
+        <div class="pv" id="preview"></div>
+      </details>
+    </div>
+
+    <div class="sect">
+      <div class="stitle">运行选项</div>
       <div class="row">
-        <div><label>桥端口</label><input type="text" id="ext_port" value="8765"></div>
-        <div><label>单条超时（秒）</label><input type="text" id="ext_timeout" value="240"></div>
+        <div><label>CI 判定策略（fail-on）</label>
+          <select id="fail_on">
+            <option value="high" selected>high — 仅高危失败算失败</option>
+            <option value="medium">medium — 中危也算</option>
+            <option value="any">any — 任何失败都算</option>
+            <option value="none">none — 只出报告不判失败</option>
+          </select></div>
+        <div><label>报告语言（下载用）</label>
+          <select id="lang"><option value="zh" selected>中文</option><option value="en">English</option></select></div>
       </div>
+      <label class="full"><input type="checkbox" id="regression_only"> 只回放回归集（修复验证用）</label>
+      <label class="full"><input type="checkbox" id="record_failures"> 把失败/可疑沉淀进回归集</label>
     </div>
-    <div id="demo-row">
-      <label style="display:flex;gap:6px;align-items:center;color:var(--ink);margin-top:12px">
-        <input type="checkbox" id="demo"> 演示模式：脚本化 1 个高危失败 + 1 个可疑（离线看报告形态）
-      </label>
+
+    <div class="actions">
+      <button class="ghost" id="checkbtn">验证配置</button>
+      <button class="primary" id="start">开始测试</button>
+      <div id="checkmsg"></div>
     </div>
-    <label>风险类别（不选 = 全部 24 条）</label>
-    <div class="chips" id="cats"></div>
-    <div class="row">
-      <div><label>CI 判定策略（fail-on）</label>
-        <select id="fail_on">
-          <option value="high" selected>high — 仅高危失败算失败</option>
-          <option value="medium">medium — 中危也算</option>
-          <option value="any">any — 任何失败都算</option>
-          <option value="none">none — 只出报告不判失败</option>
-        </select></div>
-      <div><label>报告语言（下载用）</label>
-        <select id="lang"><option value="zh" selected>中文</option><option value="en">English</option></select></div>
-    </div>
-    <label style="display:flex;gap:6px;align-items:center;color:var(--ink)">
-      <input type="checkbox" id="regression_only"> 只回放回归集（修复验证用）
-    </label>
-    <label style="display:flex;gap:6px;align-items:center;color:var(--ink)">
-      <input type="checkbox" id="record_failures"> 把失败/可疑沉淀进回归集
-    </label>
-    <button class="primary" id="start">开始测试</button>
   </div>
 
   <div class="card" id="runcard">
@@ -478,105 +645,210 @@ const CATS = [
   ["prompt-injection","提示词注入"], ["indirect-injection","间接注入"],
   ["sensitive-leak","敏感数据泄露"], ["tool-misuse","工具滥用"],
   ["excessive-agency","越权行为"], ["idor-access","越权数据访问"]];
-const SEV = {high:"高", medium:"中", low:"低", null:""};
+const SEV = {high:"高", medium:"中", low:"低"};
 const V_TXT = {pass:"通过", suspicious:"可疑", fail:"失败", error:"错误"};
 const V_CLS = {pass:"b-pass", suspicious:"b-susp", fail:"b-fail", error:"b-error"};
 
-// ---- config widgets ----
-const catState = {};
-CATS.forEach(([k]) => { catState[k] = false; });
-function renderCats() {
-  $("cats").innerHTML = CATS.map(([k, label]) =>
-    `<span class="chip ${catState[k] ? "on" : ""}" data-cat="${k}">${label}</span>`
-  ).join("") +
-  `<span class="chip" id="allcats">全选 / 清空</span>`;
-  document.querySelectorAll("#cats .chip[data-cat]").forEach(el => {
-    el.onclick = () => { catState[el.dataset.cat] = !catState[el.dataset.cat]; renderCats(); };
-  });
-  $("allcats").onclick = () => {
-    const anyOff = CATS.some(([k]) => !catState[k]);
-    CATS.forEach(([k]) => { catState[k] = anyOff; });
-    renderCats();
-  };
-}
-renderCats();
+const state = { suites: [], running: false, seen: 0, timer: null };
 
+// ---- global error surface (transparency: JS errors are never silent) ----
+function showJsError(msg) {
+  const el = $("jsmsg");
+  el.style.display = "block";
+  el.textContent = "⚠ 页面脚本异常（可截图反馈）：" + msg;
+}
+window.addEventListener("error", (e) => showJsError(e.message));
+window.addEventListener("unhandledrejection", (e) =>
+  showJsError((e.reason && e.reason.message) || String(e.reason)));
+
+// ---- adapter selection ----
+function currentAdapter() {
+  return document.querySelector("input[name=adapter]:checked").value;
+}
 document.querySelectorAll("input[name=adapter]").forEach(r => {
   r.onchange = () => {
-    const a = document.querySelector("input[name=adapter]:checked").value;
+    const a = currentAdapter();
+    document.querySelectorAll(".acard").forEach(c =>
+      c.classList.toggle("sel", c.querySelector("input").checked));
     $("llm-fields").style.display = a === "llm" ? "" : "none";
     $("ext-fields").style.display = a === "ext" ? "" : "none";
     $("demo-row").style.display = a === "dryrun" ? "" : "none";
   };
 });
 
-// ---- run / poll loop ----
-let seen = 0, timer = null;
-$("start").onclick = async () => {
-  const adapter = document.querySelector("input[name=adapter]:checked").value;
-  const body = {
+// ---- env line (llm) ----
+fetch("/api/env").then(r => r.json()).then(env => {
+  const key = env.openai_key_set
+    ? "<b class='ok'>✓ 已检测到 OPENAI_API_KEY</b>"
+    : "<b class='no'>✗ 未检测到 OPENAI_API_KEY</b>";
+  const base = env.openai_base_url_set
+    ? `<b class='ok'>✓ OPENAI_BASE_URL=${env.openai_base_url_host}</b>`
+    : "<b class='no'>✗ 未设置 OPENAI_BASE_URL</b>";
+  $("envline").innerHTML =
+    `${key} · ${base}（如需修改：在启动 jb-ape ui 的终端里 export 后重启）`;
+}).catch(() => { $("envline").textContent = "环境检测失败（本地服务未响应）"; });
+
+// ---- categories + live case preview ----
+const catState = {};
+CATS.forEach(([k]) => { catState[k] = false; });
+function selectedCats() { return CATS.filter(([k]) => catState[k]).map(([k]) => k); }
+function renderCats() {
+  $("cats").innerHTML = CATS.map(([k, label]) =>
+    `<span class="chip ${catState[k] ? "on" : ""}" data-cat="${k}">${label}</span>`
+  ).join("") + `<span class="chip" id="allcats">全选 / 清空</span>`;
+  document.querySelectorAll("#cats .chip[data-cat]").forEach(el => {
+    el.onclick = () => { catState[el.dataset.cat] = !catState[el.dataset.cat];
+                         renderCats(); };
+  });
+  $("allcats").onclick = () => {
+    const anyOff = CATS.some(([k]) => !catState[k]);
+    CATS.forEach(([k]) => { catState[k] = anyOff; });
+    renderCats();
+  };
+  updatePreview();
+}
+function updatePreview() {
+  const sel = new Set(selectedCats());
+  const list = state.suites.filter(c => sel.size === 0 || sel.has(c.category));
+  $("catline").textContent =
+    `已选 ${sel.size}/6 类 · 本次将执行 ${list.length} 条用例`
+    + `（${sel.size === 0 ? "全部类别" : "仅所选类别"}）`;
+  $("preview").innerHTML =
+    `<table><tr><th>用例</th><th>类别</th><th>场景</th><th>标题 / payload</th></tr>` +
+    list.map(c => `<tr><td>${c.id}</td><td>${c.category_label_zh}</td>
+      <td>${c.scenario}</td><td>
+      <details><summary>${esc(c.title)}</summary><pre>${esc(c.payload)}</pre></details>
+      </td></tr>`).join("") + "</table>";
+}
+
+// ---- validation (inline, no alert) ----
+function validate() {
+  let ok = true;
+  const url = $("url").value.trim();
+  $("url").classList.toggle("bad", !url);
+  $("url-err").style.display = url ? "none" : "block";
+  if (!url) ok = false;
+  if (currentAdapter() === "llm") {
+    const m = $("llm_model").value.trim();
+    $("llm_model").classList.toggle("bad", !m);
+    $("model-err").style.display = m ? "none" : "block";
+    if (!m) ok = false;
+  }
+  return ok;
+}
+
+function collectOpts() {
+  return {
     url: $("url").value.trim() || "https://demo/",
-    adapter,
+    adapter: currentAdapter(),
     llm_model: $("llm_model").value.trim(),
     llm_base_url: $("llm_base_url").value.trim(),
     ext_port: parseInt($("ext_port").value) || 8765,
     ext_timeout: parseFloat($("ext_timeout").value) || 240,
+    ext_wait: parseFloat($("ext_wait").value) || 90,
     demo: $("demo").checked,
-    categories: CATS.filter(([k]) => catState[k]).map(([k]) => k),
+    categories: selectedCats(),
     fail_on: $("fail_on").value,
     lang: $("lang").value,
     regression_only: $("regression_only").checked,
     record_failures: $("record_failures").checked,
   };
-  const res = await fetch("/api/run", {method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(body)});
-  const data = await res.json();
-  if (!res.ok) { alert(data.error || "启动失败"); return; }
-  $("cfgcard").style.opacity = 0.55;
-  document.querySelectorAll("#cfgcard input, #cfgcard select, #cfgcard button")
-    .forEach(el => el.disabled = true);
+}
+
+// ---- connectivity check (配置自检) ----
+$("checkbtn").onclick = async () => {
+  const msg = $("checkmsg");
+  $("checkbtn").disabled = true;
+  msg.className = ""; msg.style.display = "block";
+  msg.textContent = "检测中（API 直连会向目标发一条 ping，通常几秒）…";
+  try {
+    const res = await fetch("/api/check", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(collectOpts())});
+    const data = await res.json();
+    if (!res.ok) { msg.className = "no"; msg.textContent = data.error || "检测失败"; return; }
+    msg.className = data.ok ? "ok" : "no";
+    msg.textContent = (data.ok ? "✅ " : "❌ ") + data.detail;
+  } catch (e) {
+    msg.className = "no";
+    msg.textContent = "无法连接本地服务（jb-ape ui 是否在运行？）：" + e;
+  } finally {
+    $("checkbtn").disabled = false;
+  }
+};
+
+// ---- start / stop (robust: every failure path restores the button) ----
+function setRunning(on) {
+  state.running = on;
+  $("start").disabled = on;
+  $("start").textContent = on ? "运行中…" : "开始测试";
+  $("cfgcard").style.opacity = on ? 0.55 : 1;
+  document.querySelectorAll("#cfgcard input, #cfgcard select")
+    .forEach(el => { el.disabled = on; });
+}
+$("start").onclick = async () => {
+  if (state.running) return;
+  if (!validate()) return;
+  setRunning(true);
   $("runcard").style.display = "";
   $("report").style.display = "none";
-  $("cases").innerHTML = ""; seen = 0;
-  $("phase").textContent = adapter === "ext" ? "等待浏览器插件接入…" : "执行中…";
-  timer = setInterval(poll, 700); poll();
+  $("cases").innerHTML = ""; state.seen = 0;
+  $("phase").textContent = "启动中…";
+  try {
+    const res = await fetch("/api/run", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(collectOpts())});
+    const data = await res.json();
+    if (!res.ok) { setRunning(false); $("phase").textContent = "未启动：" + data.error; return; }
+    $("phase").textContent = currentAdapter() === "ext" ? "等待浏览器插件接入…" : "执行中…";
+    state.timer = setInterval(poll, 700); poll();
+  } catch (e) {
+    setRunning(false);
+    $("phase").textContent =
+      "无法连接本地服务（jb-ape ui 可能已停止）——刷新页面或重启 jb-ape ui";
+    showJsError(String(e));
+  }
 };
 $("stop").onclick = () => fetch("/api/stop", {method: "POST"});
 
 async function poll() {
-  const s = await (await fetch("/api/status")).json();
+  let s;
+  try {
+    const res = await fetch("/api/status");
+    s = await res.json();
+  } catch (e) {
+    clearInterval(state.timer);
+    setRunning(false);
+    $("phase").textContent = "与本地服务失去联系（jb-ape ui 是否还在运行？）";
+    return;
+  }
   const ph = {idle:"空闲", "waiting-extension":"等待浏览器插件接入…", running:"执行中",
               finished:"已完成", stopped:"已停止（部分结果）", error:"出错"};
   $("phase").textContent = `${ph[s.status] || s.status} · ${s.done}/${s.total}`;
   $("barfill").style.width = s.total ? `${Math.round(s.done * 100 / s.total)}%` : "0";
-  for (; seen < s.results.length; seen++) {
-    const r = s.results[seen];
+  for (; state.seen < s.results.length; state.seen++) {
+    const r = s.results[state.seen];
     const row = document.createElement("div");
     row.className = "case";
     const sev = r.severity ? `·${SEV[r.severity]}` : "";
     row.innerHTML = `<span class="id">${r.id}</span>
       <span class="cat">${r.category_label_zh}</span>
-      <span>${r.title}</span>
+      <span>${esc(r.title)}</span>
       <span class="badge ${V_CLS[r.verdict]}">${V_TXT[r.verdict]}${sev}</span>`;
     $("cases").appendChild(row);
   }
   if (s.status === "error") {
-    clearInterval(timer);
+    clearInterval(state.timer);
     $("phase").textContent = "出错：" + (s.error || "未知错误");
-    restoreCfg();
+    if (state.running) setRunning(false);
     return;
   }
   if (["finished", "stopped"].includes(s.status)) {
-    clearInterval(timer);
-    renderReport(s);
-    restoreCfg();
+    clearInterval(state.timer);
+    try { renderReport(s); }
+    catch (e) { showJsError("报告渲染异常：" + e.message); }
+    if (state.running) setRunning(false);
   }
-}
-function restoreCfg() {
-  $("cfgcard").style.opacity = 1;
-  document.querySelectorAll("#cfgcard input, #cfgcard select, #cfgcard button")
-    .forEach(el => el.disabled = false);
 }
 
 // ---- report view ----
@@ -598,12 +870,12 @@ function renderReport(s) {
     <details class="finding">
       <summary>
         <span class="badge ${V_CLS[r.verdict]}">${SEV[r.severity] || ""}·${V_TXT[r.verdict]}</span>
-        <b>${r.id}</b> ${r.category_label_zh} — ${r.title}
+        <b>${r.id}</b> ${r.category_label_zh} — ${esc(r.title)}
         <button class="ghost copybtn" data-ticket="${r.id}">复制提单</button>
       </summary>
       <div class="body">
         <div class="kv"><b>风险（白话）：</b>${r.risk_plain_zh}</div>
-        ${r.error ? `<div class="kv"><b>执行错误：</b>${r.error}</div>` : ""}
+        ${r.error ? `<div class="kv"><b>执行错误：</b>${esc(r.error)}</div>` : ""}
         ${r.excerpt ? `<div class="kv"><b>证据：</b></div><pre>${esc(r.excerpt)}</pre>` : ""}
         <div class="kv"><b>复现：</b></div>
         <pre>jb-ape qa --url ${esc(s.url || "")} --adapter ${esc(s.adapter || "dryrun")} --case ${r.id}</pre>
@@ -620,13 +892,13 @@ function renderReport(s) {
     if (r.verdict === "pass") per[r.category_label_zh][0] += 1;
   });
   $("passchips").innerHTML = Object.entries(per)
-    .map(([k, [d, t]]) => `${d === t ? "✅" : "⚠️"} ${k} ${d}/${t} 通过`)
+    .map(([k, d]) => `${d[0] === d[1] ? "✅" : "⚠️"} ${k} ${d[0]}/${d[1]} 通过`)
     .join(" · ");
 
   $("appendix").innerHTML = `<table><tr><th>用例</th><th>场景</th><th>技术</th>
     <th>判定等级</th><th>结果</th><th>严重度</th></tr>` +
     s.results.map(r => `<tr><td>${r.id}</td><td>${r.scenario}</td><td>${r.technique}</td>
-    <td>${r.level}</td><td>${V_TXT[r.verdict]}</td><td>${SEV[r.severity] || "-"}</td></tr>`).join("")
+    <td>${r.level}</td><td>${V_TXT[r.verdict]}</td><td>${r.severity ? SEV[r.severity] : "-"}</td></tr>`).join("")
     + "</table>";
 
   document.querySelectorAll("[data-ticket]").forEach(btn => {
@@ -645,7 +917,7 @@ function copyTicket(r, s) {
     `复现：jb-ape qa --url ${s.url || ""} --adapter ${s.adapter || "dryrun"} --case ${r.id}`,
     r.excerpt ? `证据：${r.excerpt}` : "",
     `修复方向：${r.fix_zh}`,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\\n");
   navigator.clipboard.writeText(txt).then(
     () => alert("提单内容已复制，直接粘贴到缺陷系统即可"),
     () => prompt("复制失败，请手动复制：", txt));
@@ -660,10 +932,14 @@ async function download(name, url) {
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
   URL.revokeObjectURL(a.href);
 }
+
+// ---- boot ----
 fetch("/api/suites").then(r => r.json()).then(cases => {
-  document.querySelector(".sub").textContent =
-    `${cases.length} 条固定基线用例 · 报告按 QA 视角输出 · 仅在本机运行，不外发任何数据`;
-});
+  state.suites = cases;
+  $("subtitle").textContent =
+    `${cases.length} 条固定基线用例 · 配置可先验证 · 用例可先预览 · 仅本机运行，不外发任何数据`;
+  renderCats();
+}).catch(() => showJsError("用例清单加载失败"));
 </script>
 </body>
 </html>

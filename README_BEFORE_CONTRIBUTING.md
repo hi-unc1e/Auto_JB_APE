@@ -14,7 +14,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests            # 全部单元�
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # 严格模式
 ```
 
-当前基线：**383 tests / ruff clean**。任何 PR 若使上述变红即不合格。
+当前基线：**388 tests / ruff clean**。任何 PR 若使上述变红即不合格。
 
 **本节不是自觉，是机械强制**：`hooks/pre-commit` 在每次提交前自动执行——
 IP/凭据泄漏扫描（§3 #11）→ `ruff check`（ruff 缺失即拒绝提交）→ 当 `src/` 或
@@ -61,7 +61,7 @@ src/jb_ape/
 armory/            种子库/先验/有效链/侦察探针/交战快照   （gitignored，本地）
 devdocs/           17 篇知识库（人类参考，可能与代码漂移）  （gitignored，本地）
 skills/jb-ape/     宿主 Agent 技能文档
-tests/             383 项；含 18 条信号契约、各红线守卫与 contributing gate
+tests/             388 项；含 18 条信号契约、各红线守卫与 contributing gate
 browser_ext/       MV3 浏览器插件（复用登录态的 ext 适配器端）
 ```
 

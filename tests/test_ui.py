@@ -33,6 +33,14 @@ def _post(base: str, path: str, obj: dict | None = None):
         return e.code, json.loads(e.read())
 
 
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def _wait_finished(base: str, timeout: float = 10.0) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -60,11 +68,48 @@ class TestUIStatic(unittest.TestCase):
         self.assertNotIn(b"http://cdn", body)
         self.assertNotIn(b"googleapis", body)
 
-    def test_suites_listing(self):
+    def test_suites_listing_with_payload_preview(self):
         _, body = _get(self.base, "/api/suites")
         cases = json.loads(body)
         self.assertEqual(len(cases), 24)
         self.assertEqual(cases[0]["id"], "QA-001")
+        self.assertTrue(all(c["payload"].strip() for c in cases))  # previewable
+
+    def test_env_flags_without_leaking_values(self):
+        _, body = _get(self.base, "/api/env")
+        env = json.loads(body)
+        self.assertEqual(sorted(env), ["openai_base_url_host",
+                                       "openai_base_url_set",
+                                       "openai_key_set"])
+        self.assertIsInstance(env["openai_key_set"], bool)  # booleans only
+
+    def test_check_dryrun_ok(self):
+        code, data = _post(self.base, "/api/check", {"adapter": "dryrun"})
+        self.assertEqual(code, 200)
+        self.assertTrue(data["ok"])
+        self.assertIn("离线", data["detail"])
+
+    def test_check_llm_missing_model(self):
+        code, data = _post(self.base, "/api/check", {"adapter": "llm"})
+        self.assertEqual(code, 200)
+        self.assertFalse(data["ok"])
+        self.assertIn("模型名", data["detail"])
+
+    def test_check_llm_unreachable_reports_cause(self):
+        # no openai package / no network in the hermetic env → ok=False + reason
+        code, data = _post(self.base, "/api/check",
+                           {"adapter": "llm", "llm_model": "m",
+                            "llm_base_url": "http://127.0.0.1:1/v1"})
+        self.assertEqual(code, 200)
+        self.assertFalse(data["ok"])
+
+    def test_check_ext_no_heartbeat(self):
+        code, data = _post(self.base, "/api/check",
+                           {"adapter": "ext", "ext_port": _free_port(),
+                            "ext_wait": 0.5})
+        self.assertEqual(code, 200)
+        self.assertFalse(data["ok"])
+        self.assertIn("插件", data["detail"])
 
     def test_unknown_path_404(self):
         code, _ = _post(self.base, "/api/nope", {})

@@ -143,7 +143,7 @@ The current signal inventory (keep in sync when adding one):
 - Read `devdocs/` (75K words of design notes; redundant with the code, and
   may be stale). If you need *why* something works, read the module docstring.
 - Edit `src/jb_ape/` prompts without running `ruff check src/ tests/` and
-  `python -m unittest discover -s tests` (383 tests guard the invariants).
+  `python -m unittest discover -s tests` (388 tests guard the invariants).
 - Commit with `--no-verify` — the pre-commit gate (IP scan · ruff · suite) is
   the enforcement of README_BEFORE_CONTRIBUTING §0; bypass only in emergencies
   and re-run the full gates afterwards.
@@ -193,7 +193,7 @@ Key invariants the tests enforce (don't break these):
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 383 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 388 tests
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # strict
 ```
 

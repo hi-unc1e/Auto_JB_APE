@@ -1,7 +1,7 @@
 # jb_ape — Agent Red-Team Engine with Machine-Verified Verdicts
 
 [![python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)]()
-[![tests](https://img.shields.io/badge/tests-383%20passing-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-388%20passing-brightgreen)]()
 [![lint](https://img.shields.io/badge/ruff-clean-success)]()
 [![license](https://img.shields.io/badge/license-MIT-informational)]()
 [![authorized use only](https://img.shields.io/badge/use-authorized%20targets%20only-e5484d)]()
@@ -262,11 +262,11 @@ producer is unit-tested.** Every capability must name its producer, its consumer
 and pass a with/without contract test in `tests/test_signal_contracts.py` —
 currently **18 signal contracts** covering recon→planner, PPL→rewriter,
 verdict→tree, verdict→QA-report, extension-tap→judge, report→GUI, and more,
-inside a **383-test** offline suite (no network, no LLM, no browser).
+inside a **388-test** offline suite (no network, no LLM, no browser).
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 383 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 388 tests
 git config core.hooksPath hooks                               # enable the commit gate
 ```
 
@@ -288,7 +288,7 @@ src/jb_ape/        the engine — models · facade · generator · planner · dt
                    engagement · mcp_server · cli · targets · browser · armory
                    qa (QA smoke suite) · bridge (ext session bridge) · report
                    ui (local web GUI)
-tests/             383 offline tests, incl. 18 signal-contract tests
+tests/             388 offline tests, incl. 18 signal-contract tests
 browser_ext/       MV3 extension for the logged-in-session adapter
 hooks/             pre-commit gate: IP-scan · ruff · full suite
 skills/jb-ape/     host Skill for agent integrators
