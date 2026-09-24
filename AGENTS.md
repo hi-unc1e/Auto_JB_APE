@@ -48,8 +48,10 @@ jb-ape sweep --track office --url https://t/ --adapter browser   # everything
   select branches; leaves compose technique×bypass×overlay and emit DISTINCT
   cases indefinitely (cyclic depth space + crossover fallback). Default
   `--planner bandit` keeps the flat loop.
-- The catalog (12 scenarios / 9 problem categories) covers the standard agent
-  red-team problems; add scenarios there, not ad-hoc scripts.
+- The catalog (15 scenarios / 9 problem categories) covers the standard agent
+  red-team problems; add scenarios there, not ad-hoc scripts. Every scenario
+  now has a frozen AgentArena counterpart with a binary oracle (15 ranges,
+  Freeze v2 2026-09-25) — see each scenario's `arena=` note in `catalog.py`.
 
 ## The 4-line usage contract
 

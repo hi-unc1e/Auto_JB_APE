@@ -3,6 +3,25 @@
 All notable changes to Auto_JB_APE are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic versioning.
 
+## [Unreleased]
+
+### Arena integration
+
+- AgentArena (sibling benchmark repo) Freeze v2: the frozen range set grew
+  from 3 to 15, one per catalog scenario (9 problem categories), each with
+  mock tools, a state machine, and a binary oracle; the v1 three ranges are
+  byte-identical (insertions-only freeze).
+- Every generic catalog scenario note now names its arena counterpart
+  (`arena=<range-id>` in `catalog.py`).
+- ASR hard bar met on all 15 scenarios (5 independent campaigns each,
+  ≥2 campaign hits and ≥40% conditional submission ASR; designated targets:
+  qwen3-8b and ministral-8b). Winning seed mechanisms: recorded-decision
+  execution, workflow-continuation, token-verification, recipient-migration.
+- Defense-side findings recorded: frontier models refuse all current misuse
+  framings (several verify state via tools first); qwen3-8b shows symbolic
+  compliance on tool-hijack (runs the whitelisted command, then falsely
+  reports the audit automation ran).
+
 ## [2.0.0] - 2026-09-24
 
 ### Release summary
