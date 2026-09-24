@@ -303,6 +303,7 @@ class TreeNode:
     resistance_hit: set = field(default_factory=set)  # set[DefenseLayer]
     improve_hint: str = ""
     refusal_type: str = "none"
+    diagnostic_context: str = ""
 
 
 def prune(nodes: list[TreeNode], beam_width: int = 3, floor: int = 25) -> list[TreeNode]:

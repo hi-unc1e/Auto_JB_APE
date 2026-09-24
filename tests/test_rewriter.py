@@ -80,11 +80,10 @@ class TestRewriterMechanical(unittest.TestCase):
 class TestRewriterSemantic(unittest.TestCase):
     def test_semantic_uses_llm_when_available(self):
         canned = (
-            '[{"payload":"variant one","mutation_chain":["T-D3"]},'
-            '{"payload":"variant two","mutation_chain":["S-CODE"]}]'
+            '[{"payload":"variant one","mutation_chain":["T-D3"],"intent_score":9},'
+            '{"payload":"variant two","mutation_chain":["S-CODE"],"intent_score":9}]'
         )
-        # ScriptedLLM: rewriter call → variants JSON; self-check calls → high score.
-        llm = ScriptedLLM([canned, '{"score": 9}', '{"score": 9}'])
+        llm = ScriptedLLM([canned])
         obj = Objective(track=Track.CODING, goal="get steps")
         rw = Rewriter(obj, llm=llm, keep_threshold=7)
         base = Variant(payload="base payload", technique="T-A1")
@@ -94,13 +93,15 @@ class TestRewriterSemantic(unittest.TestCase):
         self.assertGreater(len(out), 0)
         # The semantic variants should carry the scenario id.
         self.assertTrue(any(v.scenario for v in out))
+        self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(rw.llm_calls, 1)
 
     def test_self_check_filters_low_fidelity(self):
         canned = '[{"payload":"drifted","mutation_chain":["T-D3"]}]'
         # self-check returns score 3 → below threshold → filtered out.
         llm = ScriptedLLM([canned, '{"score": 3}'])
         obj = Objective(track=Track.CODING, goal="x")
-        rw = Rewriter(obj, llm=llm, keep_threshold=7)
+        rw = Rewriter(obj, llm=llm, keep_threshold=7, fallback_selfcheck=True)
         base = Variant(payload="base", technique="T-A1")
         fb = Feedback(quality_score=40, achieved=False,
                       recommended_layers={DefenseLayer.L3}, improve_hint="")

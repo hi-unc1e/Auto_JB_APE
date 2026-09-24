@@ -162,6 +162,66 @@ class TestLLMTargetClient(unittest.TestCase):
         # two distinct histories
         self.assertEqual(len(c._histories), 2)
 
+    def test_tool_loop_records_network_and_caps_same_tool(self):
+        calls = {"n": 0}
+
+        def handler(name, args):
+            calls["n"] += 1
+            return f"ok:{name}"
+
+        def messages(_history, _tools):
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "c1",
+                    "type": "function",
+                    "function": {
+                        "name": "search_kb",
+                        "arguments": '{"query": "password"}',
+                    },
+                }],
+            }
+
+        c = LLMTargetClient(
+            model="fake",
+            transport=lambda msgs: "",
+            tool_handler=handler,
+            message_transport=messages,
+            max_tool_steps=6,
+            max_same_tool=2,
+        )
+        result = c.submit_payload("handle ticket")
+        self.assertTrue(result.submitted)
+        self.assertEqual(len(result.network_log), 3)  # 2 real + 1 budget stop
+        self.assertEqual(calls["n"], 2)
+        self.assertIn("TOOL_BUDGET", result.network_log[-1]["result"])
+        self.assertEqual(c.get_network_log()[0]["name"], "search_kb")
+
+    def test_fresh_session_per_submit_resets_history(self):
+        c = LLMTargetClient(
+            model="fake",
+            system="sys",
+            transport=lambda msgs: "ok",
+            fresh_session_per_submit=True,
+        )
+        c.submit_payload("u1")
+        c.submit_payload("u2")
+        hist = c._history(None)
+        users = [m for m in hist if m.get("role") == "user"]
+        self.assertEqual(len(users), 1)
+        self.assertEqual(users[0]["content"], "u2")
+
+    def test_danger_tools_include_arena_names(self):
+        from jb_ape.hijack import DEFAULT_DANGER_TOOLS, HijackGate
+
+        for name in ("notify", "delete_record", "transfer"):
+            self.assertIn(name, DEFAULT_DANGER_TOOLS)
+        gate = HijackGate(success_markers=[])
+        ok, reason = gate.score({"name": "delete_record", "arguments": {"record_id": "R-1"}})
+        self.assertTrue(ok)
+        self.assertEqual(reason, "success")
+
 
 class TestEndToEndViaFakeTransport(unittest.TestCase):
     """Acceptance: a catalog scenario runs the FULL loop and the canary in the

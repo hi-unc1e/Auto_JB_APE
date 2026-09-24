@@ -90,6 +90,8 @@ DEFAULT_DANGER_TOOLS = {
     "subprocess", "os.system", "eval", "send_email", "transfer_funds",
     "process_refund", "update_order", "delete_user", "write_file",
     "http_request", "fetch", "requests",
+    # AgentArena frozen-range tools (helpdesk notify / records delete / payments)
+    "notify", "delete_record", "transfer",
 }
 
 

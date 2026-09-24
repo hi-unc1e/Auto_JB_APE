@@ -120,6 +120,10 @@ class SubmissionResult:
     console_log: list[str] = field(default_factory=list)
     error: str | None = None
     submitted: bool = False
+    # Untrusted target-side diagnostics for search guidance only. This field is
+    # deliberately excluded from ``corpus()`` so it can never manufacture a
+    # judge success; the generator forwards it only to the next-round rewriter.
+    diagnostic_context: str = ""
 
     def corpus(self) -> str:
         """Flatten all channels into one searchable text blob for keyword
@@ -181,3 +185,4 @@ class Feedback:
     recommended_layers: set[DefenseLayer]
     improve_hint: str
     refusal_type: str = "none"
+    diagnostic_context: str = ""

@@ -167,15 +167,25 @@ class LLMTargetClient:
 
     def __init__(self, model: str, base_url: str | None = None,
                  api_key: str | None = None, system: str | None = None,
-                 transport=None) -> None:
+                 transport=None, tools: list | None = None,
+                 tool_handler=None, message_transport=None,
+                 fresh_session_per_submit: bool = False,
+                 max_tool_steps: int = 6, max_same_tool: int = 2) -> None:
         self.model = model
         self.base_url = base_url
         self.api_key = api_key
         self.system = system
         self.transport = transport or self._default_transport
+        self.tools = tools
+        self.tool_handler = tool_handler
+        self.message_transport = message_transport
+        self.fresh_session_per_submit = fresh_session_per_submit
+        self.max_tool_steps = max_tool_steps
+        self.max_same_tool = max_same_tool
         self._histories: dict[str, list[dict]] = {}
         self._current: str | None = None
         self.confirmed = 0
+        self._network_log: list[dict] = []
 
     def _default_transport(self, messages: list[dict]) -> str:
         import os
@@ -215,8 +225,14 @@ class LLMTargetClient:
         pass
 
     def submit_payload(self, payload: str, *, dry_run: bool = False) -> SubmissionResult:
+        if self.fresh_session_per_submit:
+            key = self._current or "default"
+            self._histories[key] = (
+                [{"role": "system", "content": self.system}] if self.system else [])
         history = self._history(None)
         history.append({"role": "user", "content": payload})
+        if self.tool_handler is not None:
+            return self._submit_with_tools(history, dry_run=dry_run)
         try:
             reply = self.transport(list(history))
         except Exception as exc:  # noqa: BLE001 — target errors are evidence
@@ -225,16 +241,92 @@ class LLMTargetClient:
         return SubmissionResult(api_responses=[{"role": "assistant", "content": reply}],
                                  submitted=not dry_run)
 
+    def _submit_with_tools(self, history: list[dict], *, dry_run: bool) -> SubmissionResult:
+        """Drive a tool-using agent until it stops calling tools or hits caps.
+
+        Real AgentArena traces showed models burning the step budget on
+        repeated ``search_kb``; ``max_same_tool`` stops that thrash so later
+        APE mutations still have steps left to act.
+        """
+        network: list[dict] = []
+        same: dict[str, int] = {}
+        last_text = ""
+        try:
+            for _step in range(max(1, self.max_tool_steps)):
+                message = self._complete_message(history)
+                content = str(message.get("content") or "")
+                last_text = content
+                tool_calls = list(message.get("tool_calls") or [])
+                history.append({
+                    "role": "assistant",
+                    "content": content,
+                    **({"tool_calls": tool_calls} if tool_calls else {}),
+                })
+                if not tool_calls:
+                    break
+                stop = False
+                for index, item in enumerate(tool_calls):
+                    fn = item.get("function") or {}
+                    name = str(fn.get("name") or "")
+                    raw_args = fn.get("arguments") or "{}"
+                    try:
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        args = {}
+                    same[name] = same.get(name, 0) + 1
+                    if same[name] > self.max_same_tool:
+                        result = (
+                            f"TOOL_BUDGET: {name} already used {self.max_same_tool} "
+                            "times. Do not call it again; finish the task."
+                        )
+                        stop = True
+                    else:
+                        result = str(self.tool_handler(name, args))
+                    entry = {"name": name, "arguments": args, "result": result}
+                    network.append(entry)
+                    history.append({
+                        "role": "tool",
+                        "tool_call_id": str(item.get("id") or f"call_{index}"),
+                        "content": result,
+                    })
+                if stop:
+                    break
+        except Exception as exc:  # noqa: BLE001 — target errors are evidence
+            return SubmissionResult(error=f"target transport error: {exc}",
+                                    network_log=network)
+        self._network_log = network
+        return SubmissionResult(
+            api_responses=[{
+                "role": "assistant",
+                "content": last_text,
+                "tools": network,
+            }],
+            network_log=list(network),
+            dom_text=last_text,
+            submitted=not dry_run,
+        )
+
+    def _complete_message(self, history: list[dict]) -> dict:
+        if self.message_transport is not None:
+            return self.message_transport(list(history), self.tools)
+        # Fall back to text transport and let the caller parse JSON tools
+        # in AgentArena; here we only have content.
+        reply = self.transport(list(history))
+        return {"role": "assistant", "content": reply, "tool_calls": []}
+
     def get_dom_text(self) -> str:
         h = self._history(None)
-        return h[-1]["content"] if h else ""
+        if not h:
+            return ""
+        last = h[-1]
+        return str(last.get("content") or "")
 
     def get_api_responses(self) -> list[dict]:
         h = self._history(None)
         return [m for m in h if m.get("role") == "assistant"]
 
     def get_network_log(self) -> list[dict]:
-        return []
+        return list(self._network_log)
 
     def get_console_log(self) -> list[str]:
         return []

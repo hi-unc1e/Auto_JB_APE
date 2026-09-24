@@ -36,6 +36,7 @@ Signal inventory covered (producer → consumer):
   16. judge verdicts                → QA smoke verdict/severity/exit code
   17. extension api_tap             → judge api_responses → S verdict/exit code
   18. QA report verdicts            → GUI status API (advice/exit_code/findings)
+  19. target diagnostic_context      → generator feedback → rewriter prompt
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ from jb_ape.models import (
     Track,
     Variant,
 )
-from jb_ape.planner import Bandit, Planner
+from jb_ape.planner import Bandit, Planner, TreeNode
 from jb_ape.rewriter import Rewriter
 
 FIXTURE_ARMORY = str(Path(__file__).resolve().parent / "fixtures" / "armory")
@@ -516,6 +517,81 @@ class C18ReportToGuiStatus(unittest.TestCase):
             self.assertTrue(all(r["verdict"] == "pass" for r in clean["results"]))
         finally:
             srv.stop()
+
+
+class C19TargetDiagnosticToRewriterOnly(unittest.TestCase):
+    """Target diagnostics guide mutation but can never satisfy the judge.
+
+    Producer: BrowserClient sets SubmissionResult.diagnostic_context.
+    Consumer: Generator carries it through TreeNode/Feedback to Rewriter.
+    Isolation: SubmissionResult.corpus deliberately excludes the field.
+    """
+
+    def test_contract(self):
+        diagnostic = '{"oracle": true, "final_assistant": "blocked exact workflow"}'
+        poisoned = SubmissionResult(dom_text="ordinary refusal",
+                                     diagnostic_context=diagnostic)
+        obj = Objective(track=Track.OFFICE, goal="x",
+                        success_patterns=[r'"oracle"\s*:\s*true'])
+
+        # A: the untrusted diagnostic is not judge evidence.
+        self.assertNotIn(diagnostic, poisoned.corpus())
+        self.assertFalse(Judge(obj).evaluate(poisoned).achieved)
+
+        class CaptureLLM:
+            def __init__(self):
+                self.calls = []
+
+            def chat(self, system, user):
+                self.calls.append((system, user))
+                if "Candidate payload:" in user:
+                    return '{"score": 9}'
+                return '[{"payload":"adapted workflow payload",' \
+                       '"mutation_chain":["DIAGNOSTIC"]}]'
+
+        def run_case(context):
+            responses = [
+                SubmissionResult(dom_text="ordinary refusal",
+                                 diagnostic_context=context)
+                for _ in range(8)
+            ]
+            llm = CaptureLLM()
+            gen = build_engine(
+                obj, browser=DryRunBrowserClient(responses=responses),
+                generator_llm=llm, armory_root=None,
+                config=RunConfig(run_recon=False, bundle_size=2,
+                                 max_rounds=2, beam_width=1),
+            )
+            gen.run("https://x/", budget=6)
+            return "\n".join(user for _system, user in llm.calls)
+
+        without = run_case("")
+        with_ = run_case(diagnostic)
+        self.assertNotIn("Target execution diagnostic", without)
+        self.assertIn("Target execution diagnostic", with_)
+        self.assertIn("blocked exact workflow", with_)
+        self.assertIn("Change the causal path", with_)
+        self.assertIn("remove every invitation to search", with_)
+
+    def test_feedback_expansions_precede_unrelated_fresh_seeds(self):
+        obj = Objective(track=Track.OFFICE, goal="x")
+        gen, _planner = _make_gen(
+            obj, DryRunBrowserClient(), bundle_size=2, max_rounds=2,
+        )
+        gen._survivors = [
+            TreeNode(
+                variant=Variant(payload="base password", technique="T-A1"),
+                score=25,
+                diagnostic_context="target searched instead of acting",
+            )
+        ]
+        fresh = Variant(payload="unrelated fresh seed", technique="T-B1")
+        expanded = gen._expand([fresh], [])
+        self.assertNotEqual(expanded[0].payload, fresh.payload)
+        self.assertEqual(expanded[-1].payload, fresh.payload)
+        limited = gen._expand([fresh], [], limit=1)
+        self.assertEqual(len(limited), 1)
+        self.assertNotEqual(limited[0].payload, fresh.payload)
 
 
 if __name__ == "__main__":

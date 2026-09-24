@@ -84,7 +84,7 @@ def build_server():  # pragma: no cover — requires fastmcp at runtime
 
     @mcp.tool()
     def list_scenarios() -> str:
-        """List the 12 preset red-team problem scenarios (sid/problem/track)."""
+        """List the 15 preset red-team problem scenarios (sid/problem/track)."""
         import json
 
         return json.dumps(mcp_list_scenarios(), ensure_ascii=False)

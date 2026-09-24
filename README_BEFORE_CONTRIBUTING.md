@@ -14,7 +14,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests            # 全部单元�
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # 严格模式
 ```
 
-当前基线：**388 tests / ruff clean**。任何 PR 若使上述变红即不合格。
+当前基线：**393 tests / ruff clean**。任何 PR 若使上述变红即不合格。
 
 **本节不是自觉，是机械强制**：`hooks/pre-commit` 在每次提交前自动执行——
 IP/凭据泄漏扫描（§3 #11）→ `ruff check`（ruff 缺失即拒绝提交）→ 当 `src/` 或
@@ -35,7 +35,7 @@ git config core.hooksPath hooks
 ```
 src/jb_ape/
 ├── models.py      Objective/DefenseProfile/Variant/SubmissionResult/JudgeResult/Feedback
-├── catalog.py     12 预设场景（9 问题类）+ canary 金丝雀机制        ← 新增用例路径①
+├── catalog.py     15 预设场景（9 问题类）+ canary 金丝雀机制        ← 新增用例路径①
 ├── techniques.py  T-A/B/C/D/E/F 手法库（骨架+赛道+强度）            ← 路径③
 ├── jailbreak.py   Wei 两失败模式 + B-J* 机械叠加器 + 组合表
 ├── defense.py     三层防御 + B-I*/B-O* 机械 bypass 生成器          ← 路径④
@@ -61,7 +61,7 @@ src/jb_ape/
 armory/            种子库/先验/有效链/侦察探针/交战快照   （gitignored，本地）
 devdocs/           17 篇知识库（人类参考，可能与代码漂移）  （gitignored，本地）
 skills/jb-ape/     宿主 Agent 技能文档
-tests/             388 项；含 18 条信号契约、各红线守卫与 contributing gate
+tests/             393 项；含 19 条信号契约、各红线守卫与 contributing gate
 browser_ext/       MV3 浏览器插件（复用登录态的 ext 适配器端）
 ```
 

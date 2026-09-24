@@ -65,6 +65,7 @@ class RunRecord:
     resistance_hit: set = field(default_factory=set)  # set[DefenseLayer]
     improve_hint: str = ""
     refusal_type: str = "none"
+    diagnostic_context: str = ""
 
 
 @dataclass
@@ -77,6 +78,8 @@ class RunReport:
     records: list[RunRecord] = field(default_factory=list)
     recon_profile: object | None = None  # DefenseProfile from recon phase
     recon_cost: int = 0
+    rewriter_llm_calls: int = 0
+    rewriter_llm_seconds: float = 0.0
 
 
 @dataclass
@@ -173,7 +176,12 @@ class Generator:
         seeds = self.planner.plan_round(
             round_idx, self.config.max_rounds, self.config.bundle_size
         )
-        frontier = seeds if round_idx == 0 else self._expand(seeds, ctx.records)
+        remaining = max(0, budget - ctx.submissions)
+        frontier = (
+            seeds[:remaining]
+            if round_idx == 0
+            else self._expand(seeds, ctx.records, limit=remaining)
+        )
         frontier = _dedupe_variants(frontier)
 
         if self.judge_llm_for_gate is not None:
@@ -198,6 +206,7 @@ class Generator:
                 resistance_hit=set(result.resistance_hit),
                 improve_hint=result.improve_hint,
                 refusal_type=result.refusal_type,
+                diagnostic_context=sub.diagnostic_context,
             )
             ctx.records.append(rec)
             nodes.append(TreeNode(
@@ -205,6 +214,7 @@ class Generator:
                 resistance_hit=set(result.resistance_hit),
                 improve_hint=result.improve_hint,
                 refusal_type=result.refusal_type,
+                diagnostic_context=sub.diagnostic_context,
             ))
             ctx.best = _update_best(ctx.best, rec)
 
@@ -242,6 +252,8 @@ class Generator:
                     submissions=ctx.submissions, confirmed=ctx.confirmed,
                     best=ctx.best, records=ctx.records,
                     recon_profile=ctx.recon_profile, recon_cost=ctx.recon_cost,
+                    rewriter_llm_calls=self.rewriter.llm_calls,
+                    rewriter_llm_seconds=self.rewriter.llm_seconds,
                 )
                 ctx.finished = True
                 return
@@ -265,31 +277,52 @@ class Generator:
             submissions=ctx.submissions, confirmed=ctx.confirmed,
             best=ctx.best, records=ctx.records,
             recon_profile=ctx.recon_profile, recon_cost=ctx.recon_cost,
+            rewriter_llm_calls=self.rewriter.llm_calls,
+            rewriter_llm_seconds=self.rewriter.llm_seconds,
         )
 
     # -- internals ----------------------------------------------------------------
 
-    def _expand(self, seeds: list[Variant], records: list[RunRecord]) -> list[Variant]:
+    def _expand(
+        self,
+        seeds: list[Variant],
+        records: list[RunRecord],
+        limit: int | None = None,
+    ) -> list[Variant]:
         """Combine fresh seeds with rewriter expansions of prior survivors +
         GPTFuzzer CrossOver of the top-2 survivors (devdocs/12 §4.1)."""
-        out = list(seeds)
+        # Exploit observed target feedback before spending the next submissions
+        # on unrelated cold-start seeds.  The previous seed-first order delayed
+        # successful rewrites behind fresh exploration and could turn a win at
+        # submission N into a miss under a tight budget.
+        out: list[Variant] = []
         survivors = sorted(
             getattr(self, "_survivors", []),
             key=lambda n: n.score, reverse=True,
         )
         for node in survivors:
+            if limit is not None and len(out) >= limit:
+                break
             if node.variant.depth >= self.config.max_depth:
                 continue
             feedback = _feedback_for(node, self.objective.track)
-            expanded = self.rewriter.rewrite(node.variant, feedback, k=self.config.bundle_size)
+            slots = (
+                self.config.bundle_size
+                if limit is None
+                else min(self.config.bundle_size, limit - len(out))
+            )
+            if slots <= 0:
+                break
+            expanded = self.rewriter.rewrite(node.variant, feedback, k=slots)
             out.extend(expanded)
         # CrossOver: merge the two highest-scoring survivors (the dimension
         # PAIR/TAP lack — combines fragments that each partially worked).
-        if len(survivors) >= 2:
+        if len(survivors) >= 2 and (limit is None or len(out) < limit):
             out.extend(self.rewriter.crossover(
                 survivors[0].variant, survivors[1].variant, k=1,
             ))
-        return out
+        out.extend(seeds)
+        return out if limit is None else out[:limit]
 
 
 # --- helpers ---------------------------------------------------------------------
@@ -337,6 +370,7 @@ def _feedback_for(node: TreeNode, track: object) -> object:  # noqa: ARG005 — 
             recommended_layers=set(node.resistance_hit),
             improve_hint=node.improve_hint or "counter the blocked layers",
             refusal_type=node.refusal_type,
+            diagnostic_context=node.diagnostic_context,
         )
 
     # Fallback: score-based heuristic (used when no LLM judge → empty resistance_hit).
@@ -355,4 +389,5 @@ def _feedback_for(node: TreeNode, track: object) -> object:  # noqa: ARG005 — 
     return Feedback(
         quality_score=node.score, achieved=node.achieved,
         recommended_layers=layers, improve_hint=hint, refusal_type="none",
+        diagnostic_context=node.diagnostic_context,
     )
