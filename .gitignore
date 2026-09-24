@@ -51,3 +51,7 @@ jb-ape-out/
 .idea/*
 .DS_Store
 *.swp
+
+# 本地工具产物（playwright CLI / video2code 插件）
+.playwright-cli/
+.v2c/
