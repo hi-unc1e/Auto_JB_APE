@@ -55,3 +55,8 @@ jb-ape-out/
 # 本地工具产物（playwright CLI / video2code 插件）
 .playwright-cli/
 .v2c/
+
+# video project (Remotion) — keep source, exclude deps & renders
+video/node_modules/
+video/out/
+video/public/*.mp3

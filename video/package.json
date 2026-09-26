@@ -1,0 +1,17 @@
+{
+  "name": "auto-ape-video",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Auto APE framework explainer video — authorized agent red-team testing, decision tree + bandit math, high-school accessible",
+  "scripts": {
+    "render": "remotion render Main out/AutoAPE_demo.mp4",
+    "studio": "remotion studio"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.220",
+    "katex": "^0.16.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.220"
+  }
+}

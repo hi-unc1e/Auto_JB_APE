@@ -1,0 +1,42 @@
+[
+  {
+    "id": "s1",
+    "audio": "s1.mp3",
+    "audioDur": 25.68
+  },
+  {
+    "id": "s2",
+    "audio": "s2.mp3",
+    "audioDur": 25.464
+  },
+  {
+    "id": "s3",
+    "audio": "s3.mp3",
+    "audioDur": 28.44
+  },
+  {
+    "id": "s4",
+    "audio": "s4.mp3",
+    "audioDur": 28.992
+  },
+  {
+    "id": "s5",
+    "audio": "s5.mp3",
+    "audioDur": 41.544
+  },
+  {
+    "id": "s6",
+    "audio": "s6.mp3",
+    "audioDur": 36.72
+  },
+  {
+    "id": "s7",
+    "audio": "s7.mp3",
+    "audioDur": 25.752
+  },
+  {
+    "id": "s8",
+    "audio": "s8.mp3",
+    "audioDur": 29.28
+  }
+]
