@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from jb_ape.models import Track, Variant
+from jb_ape.models import ArtifactSurface, AttackArtifact, Track, Variant
 
 
 def _yaml() -> Any:
@@ -44,6 +44,7 @@ class SeedEntry:
     layers: list[str] = field(default_factory=list)
     technique: str = ""
     notes: str = ""
+    surface: ArtifactSurface = ArtifactSurface.USER_PROMPT
 
     def to_variant(
         self, goal: str, depth: int = 0, placeholders: dict | None = None
@@ -79,6 +80,13 @@ class SeedEntry:
             bypasses=[layer for layer in self.layers if layer.startswith("B-")],
             mutation_chain=[self.sid],
             depth=depth,
+            artifact=AttackArtifact(
+                surface=self.surface,
+                content=body,
+                metadata={"seed_id": self.sid},
+            ),
+            origin="seed",
+            source_id=self.sid,
         )
 
 

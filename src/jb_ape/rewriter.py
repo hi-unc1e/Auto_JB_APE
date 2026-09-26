@@ -14,6 +14,7 @@ intent drift — a hazard the original ReNeLLM random-rewrite design suffered fr
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -25,11 +26,13 @@ from jb_ape.defense import (
 )
 from jb_ape.llm import LLMClient
 from jb_ape.models import (
+    AttackArtifact,
     BypassId,
     DefenseLayer,
     Feedback,
     Objective,
     Variant,
+    derived_artifact,
 )
 from jb_ape.prompts import (
     REWRITER_SYSTEM,
@@ -105,45 +108,61 @@ class Rewriter:
         # when recon detected a perplexity filter.
         if getattr(self.profile, "ppl_filter_active", False):
             bypasses = [b for b in bypasses if b not in {"B-I2", "B-I5"}]
-        mechanical: list[Variant] = []
+        mechanical_pool: list[Variant] = []
         semantic: list[Variant] = []
 
-        # Mechanical path first (cheap, deterministic). Dispatch across both
-        # registries: defense.BYPASS_GENERATORS (B-I*/B-O*) and
-        # jailbreak.OVERLAY_GENERATORS (B-J*, devdocs/14). Cap mechanical output
-        # at half the budget so the semantic (LLM) path always gets a slot —
-        # otherwise J-overlays (3 for L3) can saturate `k` and starve semantics.
+        # Build the mechanical fallback pool first, but reserve at least one
+        # submission slot for a configured semantic rewriter.  The reservation
+        # must not depend on diagnostic text: ``rewrite_no_diagnostic`` keeps the
+        # LLM rewrite and removes only the target-derived diagnostic.  Under a
+        # tight one-slot expansion budget, allowing a mechanical variant to take
+        # that slot silently collapses the ablation into the mechanical arm.
         from jb_ape.jailbreak import overlay_bundle
 
         targets = _L1_TRIGGER_WORDS | _L1OUT_TRIGGER_WORDS
-        diagnostic_first = bool(feedback.diagnostic_context.strip() and self.llm is not None)
-        mechanical_cap = k // 2 if diagnostic_first else max(1, k // 2)
+        semantic_layers = [
+            layer
+            for layer in sorted(feedback.recommended_layers, key=lambda item: item.value)
+            if _LAYER_TO_SCENARIO.get(layer)
+        ]
+        semantic_enabled = self.llm is not None and bool(semantic_layers)
+        mechanical_cap = k // 2 if semantic_enabled else k
         for bid in bypasses:
-            if len(mechanical) >= mechanical_cap:
+            if len(mechanical_pool) >= k:
                 break
             if str(bid).startswith("B-J"):
                 bodies = overlay_bundle(base.payload, bid, targets=targets)
             else:
                 bodies = variant_bundle(base.payload, bid, targets=targets, k=2)
             for body in bodies:
-                if len(mechanical) >= mechanical_cap:
+                if len(mechanical_pool) >= k:
                     break
-                mechanical.append(self._with_meta(body, base, bid))
+                mechanical_pool.append(self._with_meta(body, base, bid, feedback))
 
-        # Semantic path: scenario switch for L2/L3. Skip the LLM call when
-        # mechanical variants already fill the budget (pi review P2-4).
-        for layer in feedback.recommended_layers:
-            scen = _LAYER_TO_SCENARIO.get(layer)
-            if scen and self.llm is not None:
-                count = max(0, k - len(mechanical) - len(semantic))
-                if count <= 0:
-                    break
-                sem = self._llm_semantic(base, feedback, scen, count=count)
-                semantic.extend(sem)
+        mechanical = mechanical_pool[:mechanical_cap]
+
+        # Semantic path: scenario switch for L2/L3.  ``mechanical_cap`` leaves
+        # room even when k == 1.  If the LLM returns no usable candidate, fill
+        # the vacated slots from the precomputed mechanical pool.
+        for layer in semantic_layers:
+            count = max(0, k - len(mechanical) - len(semantic))
+            if count <= 0:
+                break
+            semantic.extend(
+                self._llm_semantic(
+                    base,
+                    feedback,
+                    _LAYER_TO_SCENARIO[layer],
+                    count=count,
+                )
+            )
+        if len(mechanical) + len(semantic) < k:
+            mechanical = mechanical_pool[: max(0, k - len(semantic))]
 
         # Once target behavior is observable, semantic pivots carry more
         # information than another generic mechanical wrapper. Submit them
         # first so tight budgets exploit the feedback before cheap fallbacks.
+        diagnostic_first = bool(feedback.diagnostic_context.strip() and semantic)
         variants = (
             semantic + mechanical
             if diagnostic_first
@@ -153,7 +172,11 @@ class Rewriter:
         # If nothing matched a layer (e.g. low-score, no specific block),
         # fall back to a scenario re-nest + imperative force.
         if not variants:
-            variants.append(self._with_meta(nest(STORY, base.payload), base, "S-STORY"))
+            variants.append(
+                self._with_meta(
+                    nest(STORY, base.payload), base, "S-STORY", feedback
+                )
+            )
 
         # De-dup by payload body, cap at k.
         variants = _dedupe(variants)[:k]
@@ -174,6 +197,10 @@ class Rewriter:
                 bypasses=list(dict.fromkeys(parent_a.bypasses + parent_b.bypasses)),
                 mutation_chain=parent_a.mutation_chain + ["XOVER"] + parent_b.mutation_chain,
                 depth=max(parent_a.depth, parent_b.depth) + 1,
+                artifact=derived_artifact(_artifact(parent_a), merged),
+                origin="mechanical_crossover",
+                source_id="XOVER",
+                parent_sha256s=[parent_a.payload_sha256, parent_b.payload_sha256],
             )]
         user = (
             "I have two partially-successful adversarial prompts. Crossover them into "
@@ -196,6 +223,10 @@ class Rewriter:
                     scenario=parent_a.scenario,
                     bypasses=list(dict.fromkeys(parent_a.bypasses + parent_b.bypasses)),
                     mutation_chain=chain, depth=max(parent_a.depth, parent_b.depth) + 1,
+                    artifact=derived_artifact(_artifact(parent_a), body),
+                    origin="llm_crossover",
+                    source_id="XOVER",
+                    parent_sha256s=[parent_a.payload_sha256, parent_b.payload_sha256],
                 ))
         return out
 
@@ -246,6 +277,11 @@ class Rewriter:
                 payload=body, technique=base.technique,
                 scenario=scenario.sid, bypasses=base.bypasses,
                 mutation_chain=base.mutation_chain + chain, depth=base.depth + 1,
+                artifact=derived_artifact(_artifact(base), body),
+                origin="llm_rewrite",
+                source_id=scenario.sid,
+                parent_sha256s=[base.payload_sha256],
+                feedback_sha256=_feedback_sha256(feedback),
             ))
         return kept
 
@@ -309,7 +345,13 @@ class Rewriter:
             # Template has no placeholders; return as-is.
             return REWRITER_SYSTEM_V2
 
-    def _with_meta(self, body: str, base: Variant, bid: BypassId | str) -> Variant:
+    def _with_meta(
+        self,
+        body: str,
+        base: Variant,
+        bid: BypassId | str,
+        feedback: Feedback,
+    ) -> Variant:
         chain = base.mutation_chain + [bid]
         bypasses = list(base.bypasses)
         if str(bid).startswith("B-"):
@@ -317,10 +359,33 @@ class Rewriter:
         return Variant(
             payload=body, technique=base.technique, scenario=base.scenario,
             bypasses=bypasses, mutation_chain=chain, depth=base.depth + 1,
+            artifact=derived_artifact(_artifact(base), body),
+            origin="mechanical_mutation",
+            source_id=str(bid),
+            parent_sha256s=[base.payload_sha256],
+            feedback_sha256=_feedback_sha256(feedback),
         )
 
 
 # --- helpers ---------------------------------------------------------------------
+
+
+def _artifact(variant: Variant) -> AttackArtifact:
+    assert variant.artifact is not None
+    return variant.artifact
+
+
+def _feedback_sha256(feedback: Feedback) -> str:
+    payload = {
+        "quality_score": feedback.quality_score,
+        "achieved": feedback.achieved,
+        "recommended_layers": sorted(x.value for x in feedback.recommended_layers),
+        "improve_hint": feedback.improve_hint,
+        "refusal_type": feedback.refusal_type,
+        "diagnostic_context": feedback.diagnostic_context,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _dedupe(variants: list[Variant]) -> list[Variant]:

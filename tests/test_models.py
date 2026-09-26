@@ -5,6 +5,8 @@ from __future__ import annotations
 import unittest
 
 from jb_ape.models import (
+    ArtifactSurface,
+    AttackArtifact,
     DefenseLayer,
     Feedback,
     JudgeResult,
@@ -74,13 +76,23 @@ class TestJudgeResult(unittest.TestCase):
 
 class TestVariant(unittest.TestCase):
     def test_default_factory_isolation(self):
-        v = Variant(payload="x")
+        v = Variant(
+            payload="x",
+            artifact=AttackArtifact(ArtifactSurface.MEMORY, "x"),
+        )
         # Mutable defaults must be per-instance, not shared.
         v2 = Variant(payload="y")
         v.bypasses.append("B-I3")
         v.mutation_chain.append("T-D3")
         self.assertEqual(v2.bypasses, [])
         self.assertEqual(v2.mutation_chain, [])
+        self.assertEqual(v.artifact.surface, ArtifactSurface.MEMORY)
+        self.assertEqual(v.payload_sha256, v.artifact.sha256)
+        with self.assertRaises(ValueError):
+            Variant(
+                payload="x",
+                artifact=AttackArtifact(ArtifactSurface.USER_PROMPT, "y"),
+            )
 
 
 class TestFeedback(unittest.TestCase):

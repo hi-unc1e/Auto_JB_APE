@@ -287,6 +287,9 @@ class UIServer:
     def __init__(self, port: int = DEFAULT_PORT, host: str = "127.0.0.1") -> None:
         self.run = UIRun()
         self._worker: threading.Thread | None = None
+        # ThreadingHTTPServer can dispatch two /api/run requests concurrently.
+        # Admission must therefore be one atomic check-and-start operation.
+        self._admission_lock = threading.Lock()
         # One stable suite listing per server start (fresh canary per start).
         self._suites = [{
             "id": c.id, "category": c.category,
@@ -346,42 +349,59 @@ class UIServer:
                     self._json(200, {"ok": True})
                     return
                 if self.path == "/api/check":
-                    busy = server._worker is not None and server._worker.is_alive()
-                    if busy:
-                        self._json(409, {"error": "已有运行在进行中，请等它结束再自检"})
-                        return
-                    self._json(200, check_adapter(self._body()))
+                    with server._admission_lock:
+                        busy = (
+                            server._worker is not None
+                            and server._worker.is_alive()
+                        )
+                        if busy:
+                            self._json(
+                                409,
+                                {"error": "已有运行在进行中，请等它结束再自检"},
+                            )
+                            return
+                        self._json(200, check_adapter(self._body()))
                     return
                 if self.path != "/api/run":
                     self._json(404, {"error": "not found"})
-                    return
-                if server._worker is not None and server._worker.is_alive():
-                    self._json(409, {"error": "已有运行在进行中"})
                     return
                 opts = self._body()
                 if not opts:
                     self._json(400, {"error": "请求体不是合法 JSON"})
                     return
-                server.run = UIRun()
-                server.run.lang = opts.get("lang", "zh")
-                server.run.fail_on = opts.get("fail_on", "high")
-                server.run.url = opts.get("url") or "https://target/"
-                server.run.adapter = opts.get("adapter", "dryrun")
-                server.run.status = "running"
-                server.run.started_at = time.time()
-                cases = build_qa_suite(
-                    categories=[c for c in (opts.get("categories") or []) if c]
-                    or None)
-                if opts.get("regression_only"):
-                    ids = set(load_regression_ids(
-                        opts.get("regression", REGRESSION_FILE)))
-                    cases = [c for c in cases if c.id in ids]
-                server.run.total = len(cases)
-                server._worker = threading.Thread(
-                    target=_execute, args=(server.run, opts),
-                    daemon=True, name="jb-ape-ui-run")
-                server._worker.start()
-                self._json(200, {"ok": True, "total": server.run.total})
+                with server._admission_lock:
+                    if server._worker is not None and server._worker.is_alive():
+                        self._json(409, {"error": "已有运行在进行中"})
+                        return
+                    server.run = UIRun()
+                    server.run.lang = opts.get("lang", "zh")
+                    server.run.fail_on = opts.get("fail_on", "high")
+                    server.run.url = opts.get("url") or "https://target/"
+                    server.run.adapter = opts.get("adapter", "dryrun")
+                    server.run.status = "running"
+                    server.run.started_at = time.time()
+                    cases = build_qa_suite(
+                        categories=[
+                            c for c in (opts.get("categories") or []) if c
+                        ]
+                        or None
+                    )
+                    if opts.get("regression_only"):
+                        ids = set(
+                            load_regression_ids(
+                                opts.get("regression", REGRESSION_FILE)
+                            )
+                        )
+                        cases = [c for c in cases if c.id in ids]
+                    server.run.total = len(cases)
+                    server._worker = threading.Thread(
+                        target=_execute,
+                        args=(server.run, opts),
+                        daemon=True,
+                        name="jb-ape-ui-run",
+                    )
+                    server._worker.start()
+                    self._json(200, {"ok": True, "total": server.run.total})
 
             def log_message(self, *_args):
                 pass

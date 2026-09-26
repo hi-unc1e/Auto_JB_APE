@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from jb_ape.facade import build_engine, quick_run
 from jb_ape.models import (
+    ArtifactSurface,
+    AttackArtifact,
     BypassId,
     DefenseLayer,
     DefenseProfile,
@@ -29,6 +31,8 @@ from jb_ape.models import (
 from jb_ape.qa import QAReport, build_qa_suite, qa_smoke_test
 
 __all__ = [
+    "ArtifactSurface",
+    "AttackArtifact",
     "BypassId",
     "DefenseLayer",
     "DefenseProfile",

@@ -549,7 +549,7 @@ class C19TargetDiagnosticToRewriterOnly(unittest.TestCase):
                 return '[{"payload":"adapted workflow payload",' \
                        '"mutation_chain":["DIAGNOSTIC"]}]'
 
-        def run_case(context):
+        def run_case(context, *, diagnostic_feedback=True):
             responses = [
                 SubmissionResult(dom_text="ordinary refusal",
                                  diagnostic_context=context)
@@ -560,18 +560,21 @@ class C19TargetDiagnosticToRewriterOnly(unittest.TestCase):
                 obj, browser=DryRunBrowserClient(responses=responses),
                 generator_llm=llm, armory_root=None,
                 config=RunConfig(run_recon=False, bundle_size=2,
-                                 max_rounds=2, beam_width=1),
+                                 max_rounds=2, beam_width=1,
+                                 diagnostic_feedback=diagnostic_feedback),
             )
             gen.run("https://x/", budget=6)
             return "\n".join(user for _system, user in llm.calls)
 
         without = run_case("")
         with_ = run_case(diagnostic)
+        disabled = run_case(diagnostic, diagnostic_feedback=False)
         self.assertNotIn("Target execution diagnostic", without)
         self.assertIn("Target execution diagnostic", with_)
         self.assertIn("blocked exact workflow", with_)
         self.assertIn("Change the causal path", with_)
         self.assertIn("remove every invitation to search", with_)
+        self.assertNotIn("Target execution diagnostic", disabled)
 
     def test_feedback_expansions_precede_unrelated_fresh_seeds(self):
         obj = Objective(track=Track.OFFICE, goal="x")

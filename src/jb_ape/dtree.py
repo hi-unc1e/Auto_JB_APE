@@ -167,7 +167,8 @@ class Leaf:
                        scenario=nest_mode or "",
                        bypasses=[b for b in self.bypasses
                                  if not (state.ppl_filter and b in _HIGH_PPL)],
-                       mutation_chain=[self.lid] + chain, depth=d)
+                       mutation_chain=[self.lid] + chain, depth=d,
+                       origin="tree_leaf", source_id=self.lid)
 
 
 # ─────────────────────────────── the knowledge tree ───────────────────────────
@@ -375,7 +376,9 @@ class TreeWalker:
                 bypasses=list(dict.fromkeys(a.bypasses + b.bypasses)),
                 mutation_chain=["XOVER", a.mutation_chain[0] if a.mutation_chain else "?",
                                 b.mutation_chain[0] if b.mutation_chain else "?"],
-                depth=max(a.depth, b.depth) + 1))
+                depth=max(a.depth, b.depth) + 1,
+                origin="mechanical_crossover", source_id="XOVER",
+                parent_sha256s=[a.payload_sha256, b.payload_sha256]))
         self._all_cases.extend(out)
         return out
 

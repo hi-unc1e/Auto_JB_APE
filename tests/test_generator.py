@@ -83,6 +83,11 @@ class TestFacade(unittest.TestCase):
         # Default browser is the dry-run client.
         from jb_ape.browser import DryRunBrowserClient
         self.assertIsInstance(gen.browser, DryRunBrowserClient)
+        from jb_ape.llm import ScriptedLLM
+
+        shared = ScriptedLLM([])
+        with self.assertRaisesRegex(ValueError, "distinct instances"):
+            build_engine(obj, generator_llm=shared, judge_llm=shared)
 
     def test_quick_run_smoke(self):
         from jb_ape.facade import quick_run

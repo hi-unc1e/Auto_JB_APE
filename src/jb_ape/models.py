@@ -21,6 +21,47 @@ class Track(str, Enum):
     CODING = "coding"
 
 
+class ArtifactSurface(str, Enum):
+    """Where attacker-controlled content enters an agent workflow."""
+
+    USER_PROMPT = "user_prompt"
+    TOOL_RETURN = "tool_return"
+    MEMORY = "memory"
+    SKILL = "skill"
+    SUBAGENT_MESSAGE = "subagent_message"
+
+
+@dataclass(frozen=True)
+class AttackArtifact:
+    """Structured attack content without coupling it to one transport.
+
+    ``content`` remains the exact string submitted by existing adapters;
+    ``surface`` lets an integration place that string in a tool result, memory,
+    skill, or delegated message instead of silently treating every attack as a
+    direct user prompt.
+    """
+
+    surface: ArtifactSurface
+    content: str
+    metadata: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def sha256(self) -> str:
+        import hashlib
+
+        return hashlib.sha256(self.content.encode("utf-8")).hexdigest()
+
+
+def derived_artifact(parent: AttackArtifact, content: str) -> AttackArtifact:
+    """Copy placement metadata while replacing only the attack content."""
+
+    return AttackArtifact(
+        surface=parent.surface,
+        content=content,
+        metadata=dict(parent.metadata),
+    )
+
+
 class DefenseLayer(str, Enum):
     """The three + one defense layers (devdocs/02 §1).
     Used by ``DefenseProfile`` and the judge's ``resistance_hit``."""
@@ -106,6 +147,25 @@ class Variant:
     bypasses: list[BypassId] = field(default_factory=list)
     mutation_chain: list[str] = field(default_factory=list)
     depth: int = 0
+    artifact: AttackArtifact | None = None
+    origin: str = "unspecified"
+    source_id: str = ""
+    parent_sha256s: list[str] = field(default_factory=list)
+    feedback_sha256: str = ""
+
+    def __post_init__(self) -> None:
+        if self.artifact is None:
+            self.artifact = AttackArtifact(
+                surface=ArtifactSurface.USER_PROMPT,
+                content=self.payload,
+            )
+        elif self.artifact.content != self.payload:
+            raise ValueError("Variant payload and artifact content must match")
+
+    @property
+    def payload_sha256(self) -> str:
+        assert self.artifact is not None
+        return self.artifact.sha256
 
 
 @dataclass

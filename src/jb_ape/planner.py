@@ -16,7 +16,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-from jb_ape.models import DefenseProfile, Objective, Track, Variant
+from jb_ape.models import DefenseProfile, Objective, Track, Variant, derived_artifact
 from jb_ape.techniques import TECHNIQUES, Technique, render, technique_for_track
 
 
@@ -174,6 +174,7 @@ class Planner:
             seeds.append(Variant(
                 payload=body, technique=chosen.tid, scenario="",
                 bypasses=[], mutation_chain=[chosen.tid], depth=depth,
+                origin="technique_seed", source_id=chosen.tid,
             ))
 
         # Recon-aware seeding (devdocs/02 §7): on round 0, if recon detected
@@ -237,6 +238,10 @@ class Planner:
             payload=body, technique=variant.technique,
             scenario=variant.scenario, bypasses=bypasses,
             mutation_chain=chain, depth=variant.depth,
+            artifact=derived_artifact(variant.artifact, body),
+            origin="recon_mutation",
+            source_id="RECON",
+            parent_sha256s=[variant.payload_sha256],
         )
 
     def _seeds_from_armory(self, bundle_size: int) -> list[Variant]:
@@ -271,6 +276,7 @@ class Planner:
             return [Variant(
                 payload=render(tech, self.objective.goal), technique=tech.tid,
                 scenario="", bypasses=[], mutation_chain=[first], depth=0,
+                origin="effective_chain", source_id=first,
             )][:bundle_size]
         return []
 
@@ -285,6 +291,19 @@ def _stamp_hint(variant: Variant, hint: str) -> Variant:
         bypasses=list(variant.bypasses),
         mutation_chain=variant.mutation_chain + ["STEER"],
         depth=variant.depth,
+        artifact=derived_artifact(
+            variant.artifact,
+            variant.payload + "\n[operator context] " + hint,
+        ),
+        # Preserve the method identity (seed/mechanical/LLM rewrite).  STEER is
+        # a post-generation transform recorded in the mutation chain, not a new
+        # generator family; overwriting origin would corrupt method ablations.
+        origin=variant.origin,
+        source_id=variant.source_id,
+        parent_sha256s=list(
+            dict.fromkeys(variant.parent_sha256s + [variant.payload_sha256])
+        ),
+        feedback_sha256=variant.feedback_sha256,
     )
 
 

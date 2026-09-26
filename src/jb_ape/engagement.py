@@ -205,6 +205,12 @@ class Engagement:
                     "arm_id": self.ctx.best.arm_id,
                     "chain": self.ctx.best.variant.mutation_chain,
                     "technique": self.ctx.best.variant.technique,
+                    "surface": self.ctx.best.variant.artifact.surface.value,
+                    "artifact_metadata": self.ctx.best.variant.artifact.metadata,
+                    "origin": self.ctx.best.variant.origin,
+                    "source_id": self.ctx.best.variant.source_id,
+                    "parent_sha256s": self.ctx.best.variant.parent_sha256s,
+                    "feedback_sha256": self.ctx.best.variant.feedback_sha256,
                 } if self.ctx.best else None),
             },
             "walker": {
@@ -291,8 +297,24 @@ class Engagement:
         eng._prepared = snap["prepared"]
         if ctx["best"]:
             b = ctx["best"]
-            var = Variant(payload=b["payload"], technique=b["technique"],
-                          mutation_chain=b["chain"])
+            from jb_ape.models import ArtifactSurface, AttackArtifact
+
+            var = Variant(
+                payload=b["payload"],
+                technique=b["technique"],
+                mutation_chain=b["chain"],
+                artifact=AttackArtifact(
+                    surface=ArtifactSurface(
+                        b.get("surface", ArtifactSurface.USER_PROMPT.value)
+                    ),
+                    content=b["payload"],
+                    metadata=dict(b.get("artifact_metadata") or {}),
+                ),
+                origin=b.get("origin", "snapshot_restore"),
+                source_id=b.get("source_id", ""),
+                parent_sha256s=list(b.get("parent_sha256s") or []),
+                feedback_sha256=b.get("feedback_sha256", ""),
+            )
             from jb_ape.generator import RunRecord
 
             eng.ctx.best = RunRecord(

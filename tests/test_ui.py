@@ -161,10 +161,33 @@ class TestUIRun(unittest.TestCase):
         self.assertEqual(len(data["results"]), 2)
 
     def test_concurrent_run_rejected(self):
-        _post(self.base, "/api/run",
-              {"url": "https://t/", "adapter": "ext", "ext_wait": 15})
-        code, data = _post(self.base, "/api/run", {"adapter": "dryrun"})
-        self.assertEqual(code, 409)
+        import threading
+
+        ext_port = _free_port()
+        barrier = threading.Barrier(3)
+        statuses: list[int] = []
+
+        def start() -> None:
+            barrier.wait()
+            code, _ = _post(
+                self.base,
+                "/api/run",
+                {
+                    "url": "https://t/",
+                    "adapter": "ext",
+                    "ext_port": ext_port,
+                    "ext_wait": 15,
+                },
+            )
+            statuses.append(code)
+
+        threads = [threading.Thread(target=start) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sorted(statuses), [200, 409])
         self.srv.run.stop_flag.set()
 
     def test_llm_without_model_is_a_clean_error(self):

@@ -54,6 +54,11 @@ def build_engine(
     from jb_ape.hijack import HijackGate
     from jb_ape.prompts import keywords_for_track
 
+    if generator_llm is not None and generator_llm is judge_llm:
+        raise ValueError(
+            "generator_llm and judge_llm must be distinct instances"
+        )
+
     if tech_keywords is None:
         tech_keywords = keywords_for_track(objective.track)
     if hijack_gate is None and hijack_success_markers:

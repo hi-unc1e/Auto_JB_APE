@@ -27,13 +27,30 @@ from jb_ape.models import (
     SubmissionResult,
     Variant,
 )
-from jb_ape.planner import Bandit, Planner, TreeNode, on_topic_check, prune
+from jb_ape.planner import (
+    Bandit,
+    Planner,
+    TreeNode,
+    _stamp_hint,
+    on_topic_check,
+    prune,
+)
 from jb_ape.rewriter import Rewriter
 
 
 def _on_topic(payload: str, goal: str, llm) -> bool:
     """Thin wrapper so generator doesn't import the helper at call-time."""
     return on_topic_check(payload, goal, llm)
+
+
+def _active_operator_hint(planner: object) -> str:
+    """Return the latest steer hint for either tree or bandit planners."""
+
+    state = getattr(planner, "state", None)
+    hints = getattr(state, "hints", None) if state is not None else None
+    if not hints:
+        hints = getattr(planner, "hints", None)
+    return str(hints[-1]) if hints else ""
 
 
 @dataclass
@@ -45,6 +62,7 @@ class RunConfig:
     seed: int | None = None
     confirm_on_success: bool = True  # call browser.confirm_submit when achieved
     run_recon: bool = True  # devdocs/02 §7: reverse-engineer defenses before attacking
+    diagnostic_feedback: bool = True
 
 
 @dataclass
@@ -182,6 +200,15 @@ class Generator:
             if round_idx == 0
             else self._expand(seeds, ctx.records, limit=remaining)
         )
+        hint = _active_operator_hint(self.planner)
+        if hint:
+            marker = "[operator context] " + hint
+            frontier = [
+                variant
+                if marker in variant.payload
+                else _stamp_hint(variant, hint)
+                for variant in frontier
+            ]
         frontier = _dedupe_variants(frontier)
 
         if self.judge_llm_for_gate is not None:
@@ -305,7 +332,11 @@ class Generator:
                 break
             if node.variant.depth >= self.config.max_depth:
                 continue
-            feedback = _feedback_for(node, self.objective.track)
+            feedback = _feedback_for(
+                node,
+                self.objective.track,
+                include_diagnostic=self.config.diagnostic_feedback,
+            )
             slots = (
                 self.config.bundle_size
                 if limit is None
@@ -354,7 +385,12 @@ def _update_best(best: RunRecord | None, rec: RunRecord) -> RunRecord:
     return best
 
 
-def _feedback_for(node: TreeNode, track: object) -> object:  # noqa: ARG005 — track kept for symmetry
+def _feedback_for(
+    node: TreeNode,
+    track: object,
+    *,
+    include_diagnostic: bool = True,
+) -> object:  # noqa: ARG005 — track kept for symmetry
     """Build a Feedback for the rewriter from a tree node.
 
     Prefers the judge's *actual* diagnosis (resistance_hit / improve_hint /
@@ -370,7 +406,7 @@ def _feedback_for(node: TreeNode, track: object) -> object:  # noqa: ARG005 — 
             recommended_layers=set(node.resistance_hit),
             improve_hint=node.improve_hint or "counter the blocked layers",
             refusal_type=node.refusal_type,
-            diagnostic_context=node.diagnostic_context,
+            diagnostic_context=(node.diagnostic_context if include_diagnostic else ""),
         )
 
     # Fallback: score-based heuristic (used when no LLM judge → empty resistance_hit).
@@ -389,5 +425,5 @@ def _feedback_for(node: TreeNode, track: object) -> object:  # noqa: ARG005 — 
     return Feedback(
         quality_score=node.score, achieved=node.achieved,
         recommended_layers=layers, improve_hint=hint, refusal_type="none",
-        diagnostic_context=node.diagnostic_context,
+        diagnostic_context=(node.diagnostic_context if include_diagnostic else ""),
     )
