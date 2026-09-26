@@ -153,6 +153,8 @@ def cmd_run(args) -> int:
         armory_root=args.armory,
         hijack_success_markers=markers or None,
         planner_kind=args.planner,
+        planner_prior=args.planner_prior,
+        planner_prior_k=args.planner_prior_k,
     )
     out = render_report(rep, url=args.url)
     print(out)
@@ -185,6 +187,8 @@ def cmd_sweep(args) -> int:
             armory_root=args.armory,
             hijack_success_markers=markers or None,
             planner_kind=args.planner,
+            planner_prior=args.planner_prior,
+            planner_prior_k=args.planner_prior_k,
         )
         rows.append((sc, rep))
         mark = "✅" if rep.achieved else "❌"
@@ -382,6 +386,11 @@ def build_parser() -> argparse.ArgumentParser:
     pu.add_argument("--strict", action="store_true",
                     help="exit 1 if objective not achieved")
     pu.add_argument("--planner", default="bandit", choices=["bandit", "tree"])
+    pu.add_argument("--planner-prior", default="none", choices=["none", "jev"],
+                    help="cold-start bandit prior (jev: one Decisions-API "
+                         "call per target; degrades to flat on failure)")
+    pu.add_argument("--planner-prior-k", type=int, default=3,
+                    help="prior pseudo-count strength")
     pu.add_argument("--out", help="write the markdown report to this directory")
 
     pe = sub.add_parser("engage", help="stateful engagement (MCP-equivalent)")
@@ -419,6 +428,8 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--each-budget", type=int, default=5)
     ps.add_argument("--planner", default="bandit",
                     choices=["bandit", "tree"])
+    ps.add_argument("--planner-prior", default="none", choices=["none", "jev"])
+    ps.add_argument("--planner-prior-k", type=int, default=3)
     ps.add_argument("--out")
 
     pui = sub.add_parser("ui", help="local web GUI (config → run → report)")

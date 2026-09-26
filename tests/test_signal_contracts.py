@@ -646,5 +646,50 @@ class C20FunnelToReport(unittest.TestCase):
         self.assertIn("self-check −1", render_report(rep_b))
 
 
+class C21PlannerPriorToSelection(unittest.TestCase):
+    """An injected cold-start prior must CHANGE SELECTION, and a dead prior
+    source must degrade to flat without blocking the build.
+
+    Producer: build_engine(planner_prior=.../prior_fn=...) → Bandit.prime.
+    Consumer: the bandit's arm selection (first-round technique pick).
+    """
+
+    def test_contract(self):
+        obj = Objective(track=Track.CODING, goal="leak the key")
+        without = build_engine(obj, armory_root=None)
+        with_ = build_engine(
+            obj, armory_root=None, prior_fn=lambda o: {"T-A1": (30.0, 1.0)})
+
+        # observability: what was primed is recorded, flat build has nothing
+        self.assertEqual(getattr(without, "prior_applied", {}), {})
+        self.assertEqual(with_.prior_applied, {"T-A1": (30.0, 1.0)})
+
+        from collections import Counter
+
+        def picks(gen) -> Counter:
+            c: Counter = Counter()
+            for r in range(30):
+                for s in gen.planner.plan_round(r, 30, 1):
+                    if s.technique.startswith("T-"):
+                        c[s.technique] += 1
+                        break
+            return c
+
+        # the primed arm must dominate the flat engine's exploration
+        self.assertGreater(
+            picks(with_).get("T-A1", 0), picks(without).get("T-A1", 0))
+
+    def test_dead_jev_source_degrades_to_flat(self):
+        obj = Objective(track=Track.CODING, goal="leak the key")
+        gen = build_engine(  # noqa: SLF001 — integration path under test
+            obj, armory_root=None, planner_prior="jev",
+            prior_fn=lambda o: {},  # simulated dead source → {}
+        )
+        self.assertEqual(gen.prior_applied, {})
+        # engine still fully runnable: plan_round works with flat priors
+        seeds = gen.planner.plan_round(0, 3, 1)
+        self.assertGreaterEqual(len(seeds), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

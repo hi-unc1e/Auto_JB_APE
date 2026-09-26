@@ -35,6 +35,9 @@ def build_engine(
     hijack_gate=None,
     hijack_success_markers: list[str] | None = None,
     planner_kind: str = "bandit",
+    planner_prior: str = "none",
+    planner_prior_k: int = 3,
+    prior_fn=None,
 ) -> Generator:
     """Wire the full wisdom engine. ``generator_llm`` drives the rewriter;
     ``judge_llm`` drives tier-3 adjudication; ``gate_llm`` drives the TAP
@@ -77,11 +80,28 @@ def build_engine(
     judge = Judge(objective=objective, llm=judge_llm, tech_keywords=tech_keywords,
                   hijack_gate=hijack_gate)
     browser = browser or DryRunBrowserClient()
-    return Generator(
+    gen = Generator(
         objective=objective, browser=browser, judge=judge,
         rewriter=rewriter, planner=planner, bandit=bandit,
         config=config or RunConfig(), armory=armory, gate_llm=gate_llm,
     )
+    # Optional cold-start prior (signal #21): OFF by default. Evidence-gated —
+    # helps in seedless cold-start, no-op when curated seeds dominate round 0
+    # (Agent_Arena jev-ablation-large, 2026-09-27). Degrades to flat on failure.
+    if planner_prior == "jev" or prior_fn is not None:
+        if prior_fn is not None:
+            priors = dict(prior_fn(objective) or {})
+        else:
+            from jb_ape.prior import jev_priors
+
+            priors = jev_priors(
+                objective.goal, objective.track, k=planner_prior_k)
+        gen.prior_applied = dict(priors)  # observability: what was primed
+        if priors:
+            bandit.prime(objective.track, priors)
+    elif planner_prior not in {"none"}:
+        raise ValueError(f"unknown planner_prior: {planner_prior!r}")
+    return gen
 
 
 def quick_run(
@@ -98,6 +118,8 @@ def quick_run(
     hijack_gate=None,
     hijack_success_markers: list[str] | None = None,
     planner_kind: str = "bandit",
+    planner_prior: str = "none",
+    planner_prior_k: int = 3,
 ):
     """One-call convenience: build the engine and run it against ``url``."""
     gen = build_engine(
@@ -106,5 +128,6 @@ def quick_run(
         armory_root=armory_root, tech_keywords=tech_keywords, gate_llm=gate_llm,
         hijack_gate=hijack_gate, hijack_success_markers=hijack_success_markers,
         planner_kind=planner_kind,
+        planner_prior=planner_prior, planner_prior_k=planner_prior_k,
     )
     return gen.run(url, budget=budget)
