@@ -60,3 +60,5 @@ jb-ape-out/
 video/node_modules/
 video/out/
 video/public/*.mp3
+# henry-hq 机器产物
+.hq/
