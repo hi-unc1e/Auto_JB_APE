@@ -21,6 +21,17 @@ def render_report(report: RunReport, url: str = "") -> str:
     lines.append(f"- Rounds: {report.rounds} | Submissions: {report.submissions} "
                  f"(recon: {report.recon_cost}) | Confirmed: {report.confirmed}")
 
+    # Funnel (signal #20): where candidates die between generation and verdict.
+    if report.funnel:
+        f = report.funnel
+        lines.append(
+            f"- Funnel: generated {f.get('generated', 0)} → dedup −{f.get('dedup_dropped', 0)}"
+            f" → self-check −{f.get('selfcheck_dropped', 0)}"
+            f" → gate −{f.get('gate_dropped', 0)}"
+            f" → submitted {f.get('submitted', 0)} (budget-capped {f.get('budget_capped', 0)})"
+            f" → hits {f.get('hits', 0)}"
+        )
+
     # Recon summary (devdocs/02 §7)
     prof = report.recon_profile
     if prof is not None:

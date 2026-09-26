@@ -129,6 +129,7 @@ The current signal inventory (keep in sync when adding one):
 | 17 | ext api_tap | extension bridge → judge api_responses → S verdict |
 | 18 | qa report → GUI | report verdicts/advice → ui.py status API |
 | 19 | target diagnostic_context | browser result → generator feedback → rewriter prompt only |
+| 20 | funnel metrics | generator stage counters → RunReport.funnel / render_report funnel line |
 
 ## What an agent should and should NOT do
 
@@ -146,7 +147,7 @@ The current signal inventory (keep in sync when adding one):
 - Read `devdocs/` (75K words of design notes; redundant with the code, and
   may be stale). If you need *why* something works, read the module docstring.
 - Edit `src/jb_ape/` prompts without running `ruff check src/ tests/` and
-  `python -m unittest discover -s tests` (393 tests guard the invariants).
+  `python -m unittest discover -s tests` (405 tests guard the invariants).
 - Commit with `--no-verify` — the pre-commit gate (IP scan · ruff · suite) is
   the enforcement of README_BEFORE_CONTRIBUTING §0; bypass only in emergencies
   and re-run the full gates afterwards.
@@ -196,7 +197,7 @@ Key invariants the tests enforce (don't break these):
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 393 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 405 tests
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # strict
 ```
 

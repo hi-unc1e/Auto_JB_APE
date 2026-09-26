@@ -20,6 +20,7 @@ import random
 from dataclasses import dataclass, field
 
 from jb_ape.browser import BrowserClient
+from jb_ape.funnel import Funnel, self_check
 from jb_ape.judge import Judge
 from jb_ape.models import (
     DefenseLayer,
@@ -98,6 +99,7 @@ class RunReport:
     recon_cost: int = 0
     rewriter_llm_calls: int = 0
     rewriter_llm_seconds: float = 0.0
+    funnel: dict | None = None  # stage counters (signal #20, jb_ape.funnel)
 
 
 @dataclass
@@ -114,6 +116,7 @@ class RunCtx:
     recon_profile: object | None = None
     recon_cost: int = 0
     finished: bool = False
+    funnel: Funnel = field(default_factory=lambda: Funnel())
     report: RunReport | None = None
 
 
@@ -200,6 +203,7 @@ class Generator:
             if round_idx == 0
             else self._expand(seeds, ctx.records, limit=remaining)
         )
+        ctx.funnel.generated += len(frontier)
         hint = _active_operator_hint(self.planner)
         if hint:
             marker = "[operator context] " + hint
@@ -209,13 +213,29 @@ class Generator:
                 else _stamp_hint(variant, hint)
                 for variant in frontier
             ]
+        before = len(frontier)
         frontier = _dedupe_variants(frontier)
+        ctx.funnel.dedup_dropped += before - len(frontier)
+
+        # Self-check stage (signal #20): drop structurally-broken candidates
+        # (empty / oversized / fence husks / refusal leakage) BEFORE they can
+        # burn a submission. Structural only — semantics stay with the gate.
+        checked: list = []
+        for variant in frontier:
+            ok, _reason = self_check(variant.payload)
+            if ok:
+                checked.append(variant)
+            else:
+                ctx.funnel.selfcheck_dropped += 1
+        frontier = checked
 
         if self.judge_llm_for_gate is not None:
+            before = len(frontier)
             frontier = [
                 v for v in frontier
                 if _on_topic(v.payload, self.objective.goal, self.judge_llm_for_gate)
             ]
+            ctx.funnel.gate_dropped += before - len(frontier)
             if not frontier:
                 return
 
@@ -225,7 +245,11 @@ class Generator:
                 break
             sub = self.browser.submit_payload(var.payload)
             ctx.submissions += 1
+            ctx.funnel.submitted += 1
             result = self.judge.evaluate(sub, variant_bypasses=var.bypasses)
+            ctx.funnel.judged += 1
+            if result.achieved:
+                ctx.funnel.hits += 1
             rec = RunRecord(
                 variant=var, submission=sub, level=result.level,
                 achieved=result.achieved, score=result.quality_score,
@@ -281,10 +305,12 @@ class Generator:
                     recon_profile=ctx.recon_profile, recon_cost=ctx.recon_cost,
                     rewriter_llm_calls=self.rewriter.llm_calls,
                     rewriter_llm_seconds=self.rewriter.llm_seconds,
+                    funnel=ctx.funnel.snapshot(),
                 )
                 ctx.finished = True
                 return
 
+        ctx.funnel.budget_capped += len(frontier) - len(nodes)
         self._survivors = prune(nodes, beam_width=self.config.beam_width)
 
         if not any(n.achieved for n in nodes) and nodes:
@@ -306,6 +332,7 @@ class Generator:
             recon_profile=ctx.recon_profile, recon_cost=ctx.recon_cost,
             rewriter_llm_calls=self.rewriter.llm_calls,
             rewriter_llm_seconds=self.rewriter.llm_seconds,
+            funnel=ctx.funnel.snapshot(),
         )
 
     # -- internals ----------------------------------------------------------------
