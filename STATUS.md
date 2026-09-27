@@ -4,13 +4,13 @@ project: auto-jb-ape
 theme: 安全研究
 value: 研究
 state: active
-updated: 2026-09-27 09:11
+updated: 2026-09-27 09:14
 ---
 # auto-jb-ape · 状态
 
 > 引擎侧 414 测试全绿（信号 #20 漏斗 + #21 jev 先验已上线），master @ 0831f0e（README 双语亮点已推送）；jev 三轮消融收官：
 > 大样本（120 场）零反噬、达预登记接入线，已按 optional module 接入（默认关闭）；Arena 侧
-> delivery 三轴 + 正例投递控制在 eddc1d2，两个投递覆盖发现待 v3 靶场方向定夺。
+> delivery 三轴 + 正例投递控制在 v3.0 已落地（2f8f7ff）；❓ 全部清零（演示物口径：暂不主动曝光）。
 
 ## ❓ 待 Henry 判断
 
@@ -20,7 +20,7 @@ updated: 2026-09-27 09:11
   已以 optional module 接入（`--planner-prior jev`，默认关闭，API 失败退化平坦先验，jb_ape be3b8ec）。
   怎么验：`jb-ape run --planner-prior jev ...`，或读 `Agent_Arena/runs/jev-ablation-large/report.md`。
   建议：生产（带种子）工况不开；新目标冷启动/无种子探索时开启
-- [ ] **演示物对外可见性** — 两个 HTML 演示页与视频是否进 GitHub release / 博客。怎么验：Henry 定口径。预期：公开物均已带免责声明 — 建议：HTML 可直接挂 release；视频含话术示例，公开前过一遍脱敏
+- [x] **演示物对外可见性** — 两个 HTML 演示页与视频是否进 GitHub release / 博客。怎么验：Henry 定口径。预期：公开物均已带免责声明 — 建议：HTML 可直接挂 release；视频含话术示例，公开前过一遍脱敏 → Henry: 暂不主动曝光：演示物（两个 HTML + 视频）随仓库自然可见即可，不做 release 附件、不进 README 演示区、不发博客。
 - [x] **v3 靶场方向** — Henry 已拍板（2026-09-27）：**参数化 v3 家族**——5 投递面全参数化
   （每面独立毒内容语义）+ 独立良性信道（正例对照全矩阵有效）；v1/v2 字节不动，历史数据可比。
   执行中，见 ▶。
@@ -43,12 +43,12 @@ updated: 2026-09-27 09:11
 ## ✅ 机器验收
 
 <!-- hq:verify:start -->
-_由 `hq verify` 自动生成，勿手改 · 代码指纹 `5fcdc47a`_
+_由 `hq verify` 自动生成，勿手改 · 代码指纹 `2dd36e72`_
 
 | 检查 | 档 | 结果 | 耗时 | 时间 | 对应当前代码 |
 |---|---|---|---|---|---|
-| `lint` | quick | ✅ | 0.1s | 09-27 09:11 | 是 |
-| `unit-core` | quick | ✅ | 1.6s | 09-27 09:11 | 是 |
+| `lint` | quick | ✅ | 0.1s | 09-27 09:14 | 是 |
+| `unit-core` | quick | ✅ | 1.6s | 09-27 09:14 | 是 |
 | `unit-all` | full | ✅ | 14.3s | 09-26 20:28 | ⚠ 代码已变 |
 | `arena-audit` | full | ✅ | 0.1s | 09-26 20:28 | ⚠ 代码已变 |
 <!-- hq:verify:end -->

@@ -28,3 +28,8 @@
 ## D-5 devdocs/ 与 armory/ 永不推送（AGENTS.md 既有铁律，Henry 认可）
 
 内部研究 IP，gitignore 且不进任何公开产物；pre-commit IP 扫描兜底，禁 `--no-verify`。
+
+## D-6 演示物暂不主动曝光（2026-09-27 · hq note 原话）
+
+"暂不主动曝光：演示物（两个 HTML + 视频）随仓库自然可见即可，不做 release 附件、
+不进 README 演示区、不发博客。" 推翻前先在 STATUS ❓ 里重新提出。
