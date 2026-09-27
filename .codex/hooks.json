@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/dpdu/Desktop/Personal/yuque_diary/henry-hq/bin/hq gate",
+            "command": "/Users/dpdu/Desktop/Personal/hq gate",
             "timeout": 300,
             "statusMessage": "hq 验收闸门"
           }
