@@ -4,14 +4,14 @@ project: auto-jb-ape
 theme: 安全研究
 value: 研究
 state: active
-updated: 2026-10-07 20:16
+updated: 2026-10-07 21:23
 ---
 # auto-jb-ape · 状态
 
 > 本轮 P0/P1 已实现：Arena v3.1 五信道可读取，15×5 离线正例对照通过；
 > `injection` × `mistralai/ministral-8b-2512` 的五信道真实模型正例对照通过（仅证明该抽样下可投递）。
 > JB_APE 研究卡、来源快照、同候选/同投递面严格证据门槛与侦察→决策树接线已落地；
-> 423 项严格离线测试及 HQ full 4/4 通过。双语 README 与 Arena README 已按现行代码和历史证据校准；
+> 423 项严格离线测试及 HQ full 4/4 通过。Arena 研究文章与 JB_APE 中文 README 已按 Henry 的反馈改成直白表达；
 > 跨仓库晋升链路用脚本化目标验过，尚无新论文手法的真实模型 ASR 结论。
 
 ## ❓ 待 Henry 判断
@@ -41,12 +41,12 @@ updated: 2026-10-07 20:16
 ## ✅ 机器验收
 
 <!-- hq:verify:start -->
-_由 `hq verify` 自动生成，勿手改 · 代码指纹 `a355fe92`_
+_由 `hq verify` 自动生成，勿手改 · 代码指纹 `aacde93b`_
 
 | 检查 | 档 | 结果 | 耗时 | 时间 | 对应当前代码 |
 |---|---|---|---|---|---|
-| `lint` | quick | ✅ | 0.1s | 10-07 20:19 | 是 |
-| `unit-core` | quick | ✅ | 1.7s | 10-07 20:19 | 是 |
-| `unit-all` | full | ✅ | 14.3s | 10-07 20:20 | 是 |
-| `arena-audit` | full | ✅ | 0.2s | 10-07 20:20 | 是 |
+| `lint` | quick | ✅ | 0.1s | 10-07 21:24 | 是 |
+| `unit-core` | quick | ✅ | 1.8s | 10-07 21:24 | 是 |
+| `unit-all` | full | ✅ | 14.2s | 10-07 21:24 | 是 |
+| `arena-audit` | full | ✅ | 0.3s | 10-07 21:24 | 是 |
 <!-- hq:verify:end -->
