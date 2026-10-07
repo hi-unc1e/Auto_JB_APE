@@ -1,12 +1,16 @@
 # jb_ape — Agent Red-Team Engine with Machine-Verified Verdicts
 
 [![python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)]()
-[![tests](https://img.shields.io/badge/tests-414%20passing-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-423%20passing-brightgreen)]()
 [![lint](https://img.shields.io/badge/ruff-clean-success)]()
 [![license](https://img.shields.io/badge/license-MIT-informational)]()
 [![authorized use only](https://img.shields.io/badge/use-authorized%20targets%20only-e5484d)]()
 
 **[中文文档](README_cn.md)** · **[QA 冒烟测试指南 / QA quick path](README_QA.md)**
+
+For a new paper or technical URL, use the [research intake SOP](RESEARCH_SOP.md)
+and `jb-ape research` to preserve the source, hypothesis, and audited Arena
+evidence before a reviewed runtime change.
 
 jb_ape is an automated red-team engine for LLM agents. You give it an objective and
 a target; it probes the target's defenses, generates and mutates attack payloads,
@@ -285,14 +289,14 @@ rewarding arms it never sampled; a recon profile nobody read). The cure is now a
 rule: **a signal with no observable consumer is dead code, no matter how well its
 producer is unit-tested.** Every capability must name its producer, its consumer,
 and pass a with/without contract test in `tests/test_signal_contracts.py` —
-currently **21 signal contracts** covering recon→planner, PPL→rewriter,
+currently **23 signal contracts** covering recon→planner, PPL→rewriter,
 verdict→tree, verdict→QA-report, extension-tap→judge, report→GUI,
 funnel→report, jev-prior→selection, and more,
-inside a **414-test** offline suite (no network, no LLM, no browser).
+inside a **423-test** offline suite (no network, no LLM, no browser).
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 414 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 423 tests
 git config core.hooksPath hooks                               # enable the commit gate
 ```
 
@@ -314,7 +318,7 @@ src/jb_ape/        the engine — models · facade · generator · planner · dt
                    engagement · mcp_server · cli · targets · browser · armory
                    qa (QA smoke suite) · bridge (ext session bridge) · report
                    ui (local web GUI)
-tests/             414 offline tests, incl. 21 signal-contract tests
+tests/             423 offline tests, incl. 23 signal-contract tests
 browser_ext/       MV3 extension for the logged-in-session adapter
 hooks/             pre-commit gate: IP-scan · ruff · full suite
 skills/jb-ape/     host Skill for agent integrators

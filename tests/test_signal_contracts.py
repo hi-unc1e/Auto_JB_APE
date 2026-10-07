@@ -37,6 +37,8 @@ Signal inventory covered (producer → consumer):
   17. extension api_tap             → judge api_responses → S verdict/exit code
   18. QA report verdicts            → GUI status API (advice/exit_code/findings)
   19. target diagnostic_context      → generator feedback → rewriter prompt
+  22. recon profile                   → TreeWalker route set
+  23. armory write result             → truthful run report
 """
 
 from __future__ import annotations
@@ -689,6 +691,56 @@ class C21PlannerPriorToSelection(unittest.TestCase):
         # engine still fully runnable: plan_round works with flat priors
         seeds = gen.planner.plan_round(0, 3, 1)
         self.assertGreaterEqual(len(seeds), 1)
+
+
+class C22ReconProfileToTreeRouting(unittest.TestCase):
+    """Generator.prepare assigns planner.profile; TreeWalker.route must read it."""
+
+    def test_contract(self):
+        from jb_ape.dtree import TreeWalker, route
+
+        objective = Objective(track=Track.CODING, goal="inspect target behavior")
+        walker = TreeWalker(objective)
+        without = {leaf.lid for leaf in route(walker.state, walker.leaves)}
+        self.assertNotIn("X.l1.synonym", without)
+        self.assertIn("A.hijack.direct", without)  # unknown surface stays eligible
+
+        walker.profile = DefenseProfile(
+            detected_layers={DefenseLayer.L1},
+            agent_surface=False,
+        )
+        with_ = {leaf.lid for leaf in route(walker.state, walker.leaves)}
+        self.assertIn("X.l1.synonym", with_)
+        self.assertNotIn("A.hijack.direct", with_)
+
+        # Empty tool-name extraction is unknown, not proof of a tool-free target.
+        walker.profile = DefenseProfile()
+        unknown = {leaf.lid for leaf in route(walker.state, walker.leaves)}
+        self.assertIn("A.hijack.direct", unknown)
+
+
+class C23PersistenceResultToReport(unittest.TestCase):
+    """A failed armory write must be visible in the final operator report."""
+
+    def test_contract(self):
+        class FailingArmory:
+            def log_finding(self, track, record):
+                return Path("/dev/null")
+
+        objective = Objective(
+            track=Track.CODING, goal="show the flag",
+            success_patterns=[r"HTB\{x\}"],
+        )
+        gen = build_engine(
+            objective, armory_root=None,
+            browser=DryRunBrowserClient(
+                responses=[SubmissionResult(dom_text="HTB{x}")]),
+            config=RunConfig(run_recon=False, max_rounds=1, bundle_size=1),
+        )
+        gen.armory = FailingArmory()
+        report = gen.run("https://example.org/", budget=1)
+        self.assertFalse(report.records[0].persisted)
+        self.assertIn("could not be saved", render_report(report))
 
 
 if __name__ == "__main__":

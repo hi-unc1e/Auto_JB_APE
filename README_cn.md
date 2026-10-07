@@ -1,12 +1,14 @@
 # jb_ape — 带机器验证判定的 Agent 红队引擎
 
 [![python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)]()
-[![tests](https://img.shields.io/badge/tests-414%20passing-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-423%20passing-brightgreen)]()
 [![lint](https://img.shields.io/badge/ruff-clean-success)]()
 [![license](https://img.shields.io/badge/license-MIT-informational)]()
 [![仅限授权目标](https://img.shields.io/badge/%E4%BD%BF%E7%94%A8-%E4%BB%85%E9%99%90%E6%8E%88%E6%9D%83%E7%9B%AE%E6%A0%87-e5484d)]()
 
 **[English](README.md)** · **[QA 冒烟测试指南](README_QA.md)**
+
+新论文或博客进入知识库的流程见 **[研究积累 SOP](RESEARCH_SOP.md)**；`jb-ape research` 保存来源快照、候选假设和 Arena 审计证据，评审通过后再按扩展协议接入运行时。
 
 jb_ape 是一个面向 LLM Agent 的自动化红队引擎：你给它一个目标和靶标，它先侦察靶标防御，再生成并变异攻击载荷，
 经浏览器或 API 适配器驱动靶标，**用内置三级裁判裁决每一次尝试**，并在严格的提交预算下跨尝试持续学习。
@@ -245,11 +247,11 @@ jb-ape engage report --id <id>
 解药已成铁律：**没有可观测消费者的信号就是死代码，哪怕它的生产者单元测试写得再好。**
 每个能力必须写明生产者、消费者，并通过 `tests/test_signal_contracts.py` 的
 with/without 契约测试——当前 **21 个信号契约**（recon→规划器、PPL→改写器、判定→决策树、
-判定→QA 报告、插件证据→裁决、报告→GUI、漏斗→报告、jev 先验→选型……），守护在一个 **414 项**全离线测试套件之内（无网络、无 LLM、无浏览器）。
+判定→QA 报告、插件证据→裁决、报告→GUI、漏斗→报告、jev 先验→选型、侦察画像→决策树路由、留存失败→报告提示……），守护在一个 **423 项**全离线测试套件之内（无网络、无 LLM、无浏览器）。
 
 ```bash
 ruff check src/ tests/                                        # 必须干净
-PYTHONPATH=src python3 -m unittest discover -s tests          # 414 个测试
+PYTHONPATH=src python3 -m unittest discover -s tests          # 423 个测试
 git config core.hooksPath hooks                               # 启用提交门禁（一次）
 ```
 
@@ -269,7 +271,7 @@ src/jb_ape/        引擎本体 — models · facade · generator · planner · 
                    judge · rewriter · recon · defense · jailbreak · catalog
                    engagement · mcp_server · cli · targets · browser · armory
                    qa（QA 冒烟套件）· bridge（插件会话桥）· report · ui（本机 GUI）
-tests/             414 项离线测试，含 21 个信号契约测试
+tests/             423 项离线测试，含 23 个信号契约测试
 browser_ext/       登录态插件（ext 适配器端，MV3）
 hooks/             pre-commit 提交门禁：IP 扫描 · ruff · 全量套件
 skills/jb-ape/     供 Agent 集成方的宿主 Skill

@@ -85,6 +85,7 @@ class RunRecord:
     improve_hint: str = ""
     refusal_type: str = "none"
     diagnostic_context: str = ""
+    persisted: bool | None = None  # None: below B, not eligible for armory
 
 
 @dataclass
@@ -270,7 +271,7 @@ class Generator:
             ctx.best = _update_best(ctx.best, rec)
 
             if self.armory is not None and rec.level in {"S", "A", "B"}:
-                self.armory.log_finding(self.objective.track, {
+                saved = self.armory.log_finding(self.objective.track, {
                     "level": rec.level, "score": rec.score,
                     "achieved": rec.achieved, "arm_id": rec.arm_id,
                     "payload": var.payload,
@@ -279,6 +280,7 @@ class Generator:
                     "bypasses": var.bypasses,
                     "improve_hint": result.improve_hint,
                 })
+                rec.persisted = str(saved) != "/dev/null"
 
             self.bandit.reward(
                 self.objective.track, rec.arm_id, rec.achieved, rec.score

@@ -122,6 +122,9 @@ class DefenseProfile:
     l1_wordlist: set[str] = field(default_factory=set)
     l1out_redacts: bool = False  # does output-side redact raw secrets?
     agent_tools: list[str] = field(default_factory=list)
+    # None means recon could not establish presence or absence. An empty
+    # tool-name extraction is not evidence that the target has no tools.
+    agent_surface: bool | None = None
     system_prompt_leak: str = ""
     # True if recon detected a perplexity filter (devdocs/14 §4): high-PPL /
     # heavily-encoded inputs get blocked → engine should prefer readable

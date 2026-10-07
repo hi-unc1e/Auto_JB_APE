@@ -70,7 +70,15 @@ def render_report(report: RunReport, url: str = "") -> str:
     promote = [r for r in report.records if r.level in {"S", "A", "B"}]
     if promote:
         lines.append("")
-        lines.append(f"## {len(promote)} signal(s) persisted to armory/runs/")
+        saved = sum(r.persisted is True for r in promote)
+        failed = sum(r.persisted is False for r in promote)
+        not_attempted = sum(r.persisted is None for r in promote)
+        lines.append(f"## {saved}/{len(promote)} signal(s) persisted to armory/runs/")
+        if failed:
+            lines.append(f"- ⚠️ {failed} signal(s) could not be saved; "
+                         "do not treat this run as accumulated knowledge")
+        if not_attempted:
+            lines.append(f"- {not_attempted} signal(s) had no armory write attempt")
         best_chain = max(promote, key=lambda r: r.score).variant.mutation_chain
         if best_chain and not report.achieved:
             lines.append(f"- 💡 consider promoting chain `{' → '.join(best_chain)}` "

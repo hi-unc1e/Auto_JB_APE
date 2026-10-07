@@ -131,6 +131,8 @@ The current signal inventory (keep in sync when adding one):
 | 19 | target diagnostic_context | browser result → generator feedback → rewriter prompt only |
 | 20 | funnel metrics | generator stage counters → RunReport.funnel / render_report funnel line |
 | 21 | planner cold-start prior | jev/prior_fn → Bandit.prime → first-round arm selection |
+| 22 | recon profile to tree route | Generator.prepare → TreeWalker.profile → route() leaf set |
+| 23 | armory persistence result | Armory.log_finding → RunRecord.persisted → render_report warning |
 
 ## What an agent should and should NOT do
 
@@ -139,6 +141,8 @@ The current signal inventory (keep in sync when adding one):
   engine knows when it won — get it right.
 - Read `armory/seeds/*.yml` to see existing payload templates per track (the
   engine loads these automatically; you only edit them to add new hard-won seeds).
+- For a new paper or URL, start with `RESEARCH_SOP.md` and `jb-ape research`;
+  do not turn a source claim directly into a live prior or decision node.
 - Promote a winning payload: append its `mutation_chain` to
   `armory/findings/effective_chains.yml` so future runs reuse it.
 - Use `render_report()` to decide whether to submit (gate: `level in {S,A}` and
@@ -148,7 +152,7 @@ The current signal inventory (keep in sync when adding one):
 - Read `devdocs/` (75K words of design notes; redundant with the code, and
   may be stale). If you need *why* something works, read the module docstring.
 - Edit `src/jb_ape/` prompts without running `ruff check src/ tests/` and
-  `python -m unittest discover -s tests` (414 tests guard the invariants).
+  `python -m unittest discover -s tests` (423 tests guard the invariants).
 - Commit with `--no-verify` — the pre-commit gate (IP scan · ruff · suite) is
   the enforcement of README_BEFORE_CONTRIBUTING §0; bypass only in emergencies
   and re-run the full gates afterwards.
@@ -198,7 +202,7 @@ Key invariants the tests enforce (don't break these):
 
 ```bash
 ruff check src/ tests/                                        # must be clean
-PYTHONPATH=src python3 -m unittest discover -s tests          # 414 tests
+PYTHONPATH=src python3 -m unittest discover -s tests          # 423 tests
 PYTHONPATH=src python3 -W error::ResourceWarning -m unittest discover -s tests   # strict
 ```
 

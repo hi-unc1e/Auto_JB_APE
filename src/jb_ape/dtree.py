@@ -53,7 +53,7 @@ class TargetState:
     track: Track = Track.OFFICE
     layers: set = field(default_factory=set)          # set[DefenseLayer]
     ppl_filter: bool = False
-    agent_surface: bool = True                         # tools/skills present?
+    agent_surface: bool | None = None                  # None = unknown
     model_family: str | None = None
     last_blocked_mode: FailureMode | None = None
     hints: list = field(default_factory=list)          # operator steering (devdocs/17)
@@ -67,7 +67,10 @@ class TargetState:
             track=track,
             layers=set(profile.detected_layers),
             ppl_filter=bool(getattr(profile, "ppl_filter_active", False)),
-            agent_surface=bool(getattr(profile, "agent_tools", [])) or True,
+            agent_surface=(
+                True if getattr(profile, "agent_tools", [])
+                else getattr(profile, "agent_surface", None)
+            ),
             model_family=None,
         )
 
@@ -268,7 +271,7 @@ def route(state: TargetState, leaves: list[Leaf]) -> list[Leaf]:
         # class split
         if p in ("tool-hijack", "exfiltration", "workflow-assembly",
                  "skill-poisoning", "multi-agent-spread", "overeager",
-                 "indirect-injection", "idor-privilege") and not state.agent_surface:
+                 "indirect-injection", "idor-privilege") and state.agent_surface is False:
             continue
         live.append(leaf)
     # PPL constraint globally demotes (leaf.emit already skips high-PPL bypass).
@@ -301,6 +304,20 @@ class TreeWalker:
         self._xover_cursor = 0
         self._depth = 0
         self.solved_paths: list[str] = []
+        self._profile = None
+
+    @property
+    def profile(self):  # noqa: ANN201 — compatible with flat Planner.profile
+        return self._profile
+
+    @profile.setter
+    def profile(self, value) -> None:  # noqa: ANN001 — DefenseProfile duck contract
+        previous = self.state
+        self._profile = value
+        self.state = TargetState.from_profile(value, self.objective.track)
+        self.state.hints = list(previous.hints)
+        self.state.disabled_families = set(previous.disabled_families)
+        self.state.last_blocked_mode = previous.last_blocked_mode
 
     # The generator writes the round's majority blocked mode to
     # ``planner.last_blocked_mode`` (planner.Planner has it as a real field);

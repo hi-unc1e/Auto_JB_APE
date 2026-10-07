@@ -475,6 +475,22 @@ def build_parser() -> argparse.ArgumentParser:
     pq.add_argument("--demo", action="store_true",
                     help="dryrun: script 1 High failure + 1 Suspicious so the "
                          "report shape is visible offline")
+
+    pr = sub.add_parser("research", help="private source → hypothesis → evidence ledger")
+    pr.add_argument("--armory", default="armory")
+    prs = pr.add_subparsers(dest="research_cmd", required=True)
+    pra = prs.add_parser("intake", help="validate a source card and snapshot")
+    pra.add_argument("--card", required=True, help="draft card JSON")
+    prs.add_parser("list", help="list research candidates")
+    pre = prs.add_parser("attach", help="audit and attach AgentArena evidence")
+    pre.add_argument("--id", required=True)
+    pre.add_argument("--manifest", required=True)
+    pre.add_argument("--arena", default="../Agent_Arena")
+    prd = prs.add_parser("decide", help="record a reviewed disposition")
+    prd.add_argument("--id", required=True)
+    prd.add_argument("--disposition", required=True,
+                     choices=["knowledge", "seed", "decision_node", "new_range", "reject"])
+    prd.add_argument("--rationale", required=True)
     return p
 
 def _common(sp, url: bool = False) -> None:
@@ -497,6 +513,33 @@ def _common(sp, url: bool = False) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.cmd == "research":
+        from jb_ape.research import (
+            attach_arena_evidence,
+            decide,
+            intake,
+            list_cards,
+        )
+
+        try:
+            if args.research_cmd == "intake":
+                card = intake(args.armory, args.card)
+                print(f"{card['id']} candidate: {card['title']}")
+            elif args.research_cmd == "list":
+                for card in list_cards(args.armory):
+                    print(f"{card['id']} {card['status']} {card['title']}")
+            elif args.research_cmd == "attach":
+                row = attach_arena_evidence(
+                    args.armory, args.id, args.manifest, args.arena)
+                print("verified" if row["verified"] else "unverified")
+                return 0 if row["verified"] else 1
+            elif args.research_cmd == "decide":
+                card = decide(args.armory, args.id, args.disposition, args.rationale)
+                print(f"{card['id']} {card['status']}: {args.disposition}")
+            return 0
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"research: {exc}", file=sys.stderr)
+            return 2
     if args.cmd == "scenarios":
         return cmd_scenarios(args)
     if args.cmd == "recon":
